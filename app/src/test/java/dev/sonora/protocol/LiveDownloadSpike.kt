@@ -35,24 +35,34 @@ class LiveDownloadSpike {
         val query = LiveServer.query()
 
         val candidates = mutableListOf<Candidate>()
+        val seenPeers = mutableSetOf<String>()
         val lock = Any()
 
         SoulseekSession(
             username = username,
             password = password,
             transferTimeoutMillis = ATTEMPT_TIMEOUT_MS,
+            shareDirectory = SHARE_DIRECTORY,
             onTrace = { println("[spike] $it") },
         ).use { session ->
             val login = session.connect()
             println("[spike] login: $login")
             assertTrue("login rejected: $login", login is LoginResponse.Success)
 
+            // One candidate per peer. Adding every matching file means a single peer sharing a
+            // thousand covers drowns out everyone else, which is how an earlier run drew
+            // fifteen "distinct" attempts that were really two peers.
             session.search(query) { response ->
-                val found = response.files
-                    .filter { it.size in MIN_BYTES..MAX_BYTES }
-                    .map { Candidate(response.username, it, response.hasFreeUploadSlot) }
-
-                synchronized(lock) { candidates.addAll(found) }
+                val usable = response.files.firstOrNull { it.size in MIN_BYTES..MAX_BYTES }
+                if (usable != null) {
+                    synchronized(lock) {
+                        if (seenPeers.add(response.username)) {
+                            candidates.add(
+                                Candidate(response.username, usable, response.hasFreeUploadSlot),
+                            )
+                        }
+                    }
+                }
             }
             println("[spike] searching \"$query\" for files between $MIN_BYTES and $MAX_BYTES bytes")
 
@@ -61,7 +71,10 @@ class LiveDownloadSpike {
 
             // An uploader with no free slot will queue us, and the transfer may not start for
             // minutes or hours — so try those first, and only fall back to a queued peer.
+            // Shuffle first so the ordering is random within each group: sorting by size alone
+            // kept selecting the same few small-file peers, which is a biased sample of clients.
             val ordered = synchronized(lock) { candidates.toList() }
+                .shuffled()
                 .sortedByDescending { it.hasFreeSlot }
             println(
                 "[spike] ${ordered.size} candidate(s), " +
@@ -116,6 +129,12 @@ class LiveDownloadSpike {
     )
 
     private companion object {
+        /**
+         * A real directory to advertise. Sharing nothing marks us as a leecher, which is a
+         * plausible reason peers offer a transfer and then abandon it.
+         */
+        val SHARE_DIRECTORY = File(System.getProperty("java.io.tmpdir"), "sonora-share")
+
         /** Keep to small files: this hits real peers and real upload slots. */
         const val MIN_BYTES = 20L * 1024
         const val MAX_BYTES = 5L * 1024 * 1024
@@ -125,7 +144,7 @@ class LiveDownloadSpike {
          * breadth matters more than patience: if the downloader-opened path works with any
          * meaningful share of clients, this will find one.
          */
-        const val MAX_ATTEMPTS = 15
+        const val MAX_ATTEMPTS = 10
         const val CANDIDATE_WAIT_MS = 8_000
 
         /**

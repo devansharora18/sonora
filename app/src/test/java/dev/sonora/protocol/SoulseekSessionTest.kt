@@ -317,75 +317,9 @@ class SoulseekSessionTest {
         }
     }
 
-    @Test(timeout = 30_000)
-    fun `download opens the file connection itself before accepting`() {
-        val payload = ByteArray(20_000) { (it % 251).toByte() }
-        val connections = AtomicInteger()
-
-        FakePeer(
-            conversation = { peer ->
-                when (connections.incrementAndGet()) {
-                    // 1. The P connection we ask for the file on.
-                    1 -> {
-                        peer.read() // QueueUpload
-                        peer.send(
-                            TransferRequest.CODE,
-                            MessageWriter()
-                                .writeUInt32(TransferRequest.DIRECTION_UPLOAD)
-                                .writeUInt32(TRANSFER_TOKEN)
-                                .writeString("track.flac")
-                                .writeUInt64(payload.size.toLong())
-                                .toByteArray(),
-                        )
-                        peer.read() // TransferResponse
-                    }
-
-                    // 2. The F connection we opened ourselves, before accepting. Modelled the
-                    //    way the reference behaves: the uploader sends FileTransferInit over an
-                    //    existing connection rather than dialling out.
-                    else -> {
-                        peer.outputStream().write(FileTransfer.Init.encode(TRANSFER_TOKEN))
-                        peer.outputStream().flush()
-                        peer.inputStream().readExactly(FileTransfer.Offset.BYTES)
-                        peer.outputStream().write(payload)
-                        peer.outputStream().flush()
-                    }
-                }
-            },
-        ).use { peer ->
-            FakeSoulseekServer().use { server ->
-                server.peerPort = peer.port
-
-                // The relayed fallback is disabled and the server sends no relay, so the only
-                // way this can complete is a file connection we opened ourselves.
-                session(server).use { session ->
-                    session.connect()
-
-                    val destination = File.createTempFile("sonora-preopen", ".bin")
-                    destination.deleteOnExit()
-
-                    val outcome = session.download(
-                        "some_peer",
-                        "track.flac",
-                        destination,
-                        payload.size.toLong(),
-                    )
-
-                    assertEquals(DownloadOutcome.Completed(payload.size.toLong()), outcome)
-                    assertArrayEquals(payload, destination.readBytes())
-                    assertTrue(
-                        "we should have opened an F connection ourselves",
-                        peer.directConnectionTypes.contains(PeerInit.TYPE_FILE),
-                    )
-                }
-            }
-        }
-    }
-
     private fun session(
         server: FakeSoulseekServer,
         maxConcurrentPeers: Int = SoulseekSession.DEFAULT_MAX_CONCURRENT_PEERS,
-        fileConnectionFallbackMillis: Long = DISABLED_FALLBACK_MS,
     ) = SoulseekSession(
         username = "test_user",
         password = "test_password",
@@ -394,13 +328,9 @@ class SoulseekSessionTest {
         // Ephemeral: the peer listener must not collide with anything on the test machine.
         listenPort = 0,
         maxConcurrentPeers = maxConcurrentPeers,
-        fileConnectionFallbackMillis = fileConnectionFallbackMillis,
     )
 
     private companion object {
         const val TRANSFER_TOKEN = 4242L
-
-        /** Existing tests exercise the peer-initiated path, so the fallback stays out of the way. */
-        const val DISABLED_FALLBACK_MS = 3_600_000L
     }
 }

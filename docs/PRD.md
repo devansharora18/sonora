@@ -465,14 +465,16 @@ not.
 `upnp = False` and no port forwarding. It **downloaded a file in seconds**, with transfer states
 `Queued → Getting status → Transferring → Finished`.
 
-Meanwhile our client, on the same host and network, failed 15 consecutive attempts.
+Sonora initially failed repeated attempts. After correcting the direct `PeerInit` identity and
+separating the bounded `F`-dial pool from the search `P`-dial pool, Sonora completed a live
+4,258,304-byte download on the same host and network.
 
 Conclusions:
 
 - **Downloads work from behind NAT, without UPnP and without a forwarded port.** The inbound-port
   theory is dead. BitTorrent's model applies: the connection is established outward.
-- **The remaining problem is our implementation**, not connectivity, and not the platform. So a
-  phone on mobile data is a viable target — the PRD's premise survives.
+- **The remaining problem was our implementation**, not connectivity or the platform. A phone
+  on mobile data is a viable target — the PRD's premise survives.
 - We now have a **reproducible working reference** on this machine (~2 minutes to run), which is
   what should have been built the moment a working client was identified.
 
@@ -485,5 +487,38 @@ driver, which stopped Nicotine+ spawning its worker. Three times in this session
 instrument nearly produced a confident wrong conclusion. **A negative result from a control I
 wrote is not evidence until the control is itself verified against a known-positive case.**
 
-**Next:** the connection trace from the working client (in progress) to identify the behaviour
-ours lacks — likely in how we advertise ourselves or in what we send during the handshake.
+### Mechanism, confirmed from the working client's log
+
+```
+[Conn] Received indirect connection request of type F from user she11sh0cked
+[Conn] Attempting direct connection of type F to user she11sh0cked
+[Conn] Established outgoing connection of type F with user she11sh0cked
+[Conn] Responding to indirect connection request of type F, token 6729998
+[Msg] IN:  <F - FileTransferInit> {'token': 6729995, 'is_outgoing': False}
+[Msg] OUT: <F - FileOffset> {'offset': 0}
+```
+
+The uploader sends `ConnectToPeer` of type `F`, the server relays it, the **downloader dials
+out** (so NAT is irrelevant), sends `PierceFireWall`, receives `FileTransferInit`, and replies
+`FileOffset`. Sonora now implements this path and has completed a live download.
+
+### Hypotheses tested against the live network and eliminated
+
+| # | Hypothesis | Result |
+| - | ---------- | ------ |
+| 1 | Peer gives up because we are slow to wait | 180s per attempt — no change |
+| 2 | The accepting `TransferResponse` must carry the file size | no change |
+| 3 | Downloader must pre-open the `F` connection | no change |
+| 4 | Failure is a local socket bug | was teardown noise |
+| 5 | Peers that do this are rare; our sample was biased | 10 distinct peers, all fail |
+| 6 | Advertising zero shares marks us a leecher | advertised real counts — no change |
+| 7 | We skipped `ConnectToPeer` in the modern order | implemented it — no change |
+| 8 | `PeerInit` sends the wrong username field | fixed — direct handshakes now send Sonora's username |
+| 9 | F relays were delayed behind search P relays | **fixed — dedicated bounded F-dial pool** |
+
+**Root cause:** a broad search produced thousands of `P` relays. Sonora queued `F` relays in
+the same FIFO dial pool, so file-transfer negotiation expired before the F task ran. A separate
+bounded pool for F relays fixed the starvation.
+
+**Live result:** one search candidate completed a **4,258,304-byte download** over the NATed
+host, with no UPnP and no port forwarding. The mobile-data premise survives.

@@ -64,6 +64,14 @@ class SoulseekSession(
     private val port: Int = DEFAULT_PORT,
     private val listenPort: Int = SetWaitPort.DEFAULT_PORT,
     /**
+     * Directory reported to the network as shared.
+     *
+     * Advertising zero shares marks us as a leecher, which Soulseek's etiquette — and many
+     * users' upload rules — treat as grounds to refuse. Counting a real directory keeps the
+     * advertisement honest rather than claiming shares we do not have.
+     */
+    private val shareDirectory: File? = null,
+    /**
      * Upper bound on peer connections dialled at once.
      *
      * A single search can produce thousands of relays, so this must be capped — one thread and
@@ -88,6 +96,7 @@ class SoulseekSession(
 
     private val searches = ConcurrentHashMap<Long, (SearchResponse) -> Unit>()
     private val nextToken = AtomicLong(1)
+    private val nextConnectToken = AtomicLong(1)
     private val outboundPeers = ConcurrentHashMap.newKeySet<Socket>()
     private val pendingAddresses = ConcurrentHashMap<String, BlockingQueue<UserAddress>>()
     private val pendingTransfers = ConcurrentHashMap<Long, PendingTransfer>()
@@ -105,6 +114,18 @@ class SoulseekSession(
             Thread(runnable, "sonora-dial").apply { isDaemon = true }
         },
         RejectedExecutionHandler { _, _ -> onTrace("relay dropped: dial queue full") },
+    )
+
+    // File relays must not wait behind thousands of search-result P connections. A download
+    // has a short-lived negotiation window, while search peers can be processed opportunistically.
+    private val fileDials = ThreadPoolExecutor(
+        FILE_DIAL_THREADS,
+        FILE_DIAL_THREADS,
+        0L,
+        TimeUnit.MILLISECONDS,
+        ArrayBlockingQueue(FILE_DIAL_QUEUE_CAPACITY),
+        ThreadFactory { runnable -> Thread(runnable, "sonora-file-dial").apply { isDaemon = true } },
+        RejectedExecutionHandler { _, _ -> onTrace("file relay dropped: dial queue full") },
     )
 
     private var server: ServerConnection? = null
@@ -149,7 +170,10 @@ class SoulseekSession(
 
         connection.send(SetWaitPort.CODE, SetWaitPort.request(peerListener.boundPort))
         connection.send(SetStatus.CODE, SetStatus.request(SetStatus.ONLINE))
-        connection.send(SharedFoldersFiles.CODE, SharedFoldersFiles.request(0, 0))
+
+        val (directories, files) = shareDirectory?.let(::countShared) ?: (0L to 0L)
+        onTrace("advertising $directories directory(ies), $files file(s)")
+        connection.send(SharedFoldersFiles.CODE, SharedFoldersFiles.request(directories, files))
         connection.startReading(::onServerMessage)
 
         server = connection
@@ -185,7 +209,8 @@ class SoulseekSession(
         val address = runCatching { ConnectToPeer.parse(body) }.getOrNull() ?: return
         onTrace("relay ${address.username} ${address.connectionType} ${address.ipAddress()}:${address.port}")
 
-        dials.execute {
+        val executor = if (address.connectionType == PeerInit.TYPE_FILE) fileDials else dials
+        executor.execute {
             try {
                 dialPeer(address) { onPeerMessage(address.username, it) }
             } catch (e: Exception) {
@@ -263,6 +288,19 @@ class SoulseekSession(
         return dialDirect(username, address, PeerInit.TYPE_PEER)
     }
 
+    private fun countShared(root: File): Pair<Long, Long> {
+        if (!root.isDirectory) return 0L to 0L
+
+        var directories = 0L
+        var files = 0L
+
+        root.walkTopDown().forEach { entry ->
+            if (entry.isDirectory) directories++ else files++
+        }
+
+        return directories to files
+    }
+
     private fun resolveAddress(username: String): UserAddress? {
         val connection = checkNotNull(server) { "not connected" }
 
@@ -275,24 +313,6 @@ class SoulseekSession(
         } finally {
             pendingAddresses.remove(username)
         }
-    }
-
-    /**
-     * Opens a file connection to the uploader ourselves.
-     *
-     * The spec says the uploader opens it, and usually it does — but that requires the uploader to
-     * reach us, and a phone behind CGNAT is not reachable. Peers demonstrably send indirect
-     * requests for `P` connections, but none have been observed doing so for `F`. Rather than wait
-     * forever, dial out — the direction that works from behind NAT.
-     */
-    private fun initiateFileConnection(username: String, transfer: PendingTransfer) {
-        if (transfer.isClaimed || closed) return
-
-        onTrace("no file connection from $username; dialling it ourselves")
-
-        val address = resolveAddress(username) ?: return
-        val session = dialDirect(username, address, PeerInit.TYPE_FILE) ?: return
-        handleFileConnection(session)
     }
 
     /**
@@ -324,43 +344,10 @@ class SoulseekSession(
             token = accepted
             pendingTransfers[accepted] = transfer
             watchNegotiationConnection(peer, transfer)
-
-            // Open the file connection *before* accepting.
-            //
-            // The uploader only sends `FileTransferInit` over an existing connection: it looks
-            // for one when it handles our acceptance, and if there is none it dials us instead —
-            // which fails from behind NAT, and the transfer dies. Accepting first loses that race
-            // every time, so the connection has to be up before the acceptance goes out.
-            val address = resolveAddress(username)
-            val fileSession = address?.let { dialDirect(username, it, PeerInit.TYPE_FILE) }
-
-            if (fileSession == null) {
-                onTrace("could not pre-open a file connection to $username")
-            } else {
-                // Give the peer a moment to register the inbound connection before we accept.
-                // It only reuses a connection it already knows about when it handles our
-                // acceptance, and our PeerInit is processed asynchronously on its side.
-                Thread.sleep(FILE_CONNECTION_SETTLE_MS)
-
-                thread(name = "sonora-file-$username", isDaemon = true) {
-                    handleFileConnection(fileSession)
-                }
-            }
         }
 
         if (negotiation !is DownloadRequest.Accepted) {
             return DownloadOutcome.Failed("the download request was not accepted")
-        }
-
-        // Some clients never open the file connection when the downloader cannot be reached, so
-        // dial them instead of waiting forever.
-        thread(name = "sonora-file-fallback", isDaemon = true) {
-            try {
-                Thread.sleep(fileConnectionFallbackMillis)
-                initiateFileConnection(username, transfer)
-            } catch (_: InterruptedException) {
-                // Session shutting down.
-            }
         }
 
         return try {
@@ -419,10 +406,7 @@ class SoulseekSession(
 
             // Echo the size we believe in — the caller's from the search result, since the peer
             // reports 0 for files over 2 GB.
-            peer.send(
-                TransferResponse.CODE,
-                TransferResponse.accepted(request.token, expectedSize ?: request.size),
-            )
+            peer.send(TransferResponse.CODE, TransferResponse.accepted(request.token))
 
             outcome = DownloadRequest.Accepted(request.token, request.filename, request.size)
             break
@@ -535,7 +519,7 @@ class SoulseekSession(
             Framing.PEER_INIT.write(
                 socket.getOutputStream(),
                 PeerInit.CODE,
-                PeerInit.request(username, connectionType),
+                PeerInit.request(this.username, connectionType),
             )
 
             return PeerSession(username, connectionType, socket)
@@ -605,6 +589,7 @@ class SoulseekSession(
         listener?.close()
         server?.close()
         dials.shutdownNow()
+        fileDials.shutdownNow()
         outboundPeers.forEach { it.close() }
         outboundPeers.clear()
         server = null
@@ -626,6 +611,9 @@ class SoulseekSession(
          * descriptor limit, wide enough that results still stream in promptly.
          */
         const val DEFAULT_MAX_CONCURRENT_PEERS = 50
+
+        private const val FILE_DIAL_THREADS = 4
+        private const val FILE_DIAL_QUEUE_CAPACITY = 128
 
         /**
          * Relays are tiny, so queuing is cheap and generous — the scarce resource is sockets,

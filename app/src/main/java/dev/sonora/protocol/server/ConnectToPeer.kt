@@ -1,6 +1,7 @@
 package dev.sonora.protocol.server
 
 import dev.sonora.protocol.MessageReader
+import dev.sonora.protocol.MessageWriter
 
 /**
  * Server code 18 (ConnectToPeer).
@@ -12,6 +13,20 @@ import dev.sonora.protocol.MessageReader
 object ConnectToPeer {
 
     const val CODE = 18L
+
+    /**
+     * Builds an outgoing indirect-connection request.
+     *
+     * Sent before dialling a peer directly: the server relays the intent to them, which is what
+     * the documented modern connection order starts with. Skipping it means the peer is never
+     * told we are coming.
+     */
+    fun request(token: Long, username: String, connectionType: String): ByteArray =
+        MessageWriter()
+            .writeUInt32(token)
+            .writeString(username)
+            .writeString(connectionType)
+            .toByteArray()
 
     fun parse(body: ByteArray): PeerAddress {
         val reader = MessageReader(body)
