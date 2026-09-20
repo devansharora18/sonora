@@ -92,7 +92,7 @@ enum class Framing(val codeSize: Int, val lengthPrefixed: Boolean) {
  * [InputStream.read] is allowed to return fewer bytes than requested, so a single call is
  * not enough. This is where naive protocol parsers silently desync from the wire.
  */
-private fun InputStream.readExactly(count: Int): ByteArray {
+internal fun InputStream.readExactly(count: Int): ByteArray {
     val bytes = ByteArray(count)
     var offset = 0
     while (offset < count) {
