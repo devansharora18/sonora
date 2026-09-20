@@ -120,7 +120,12 @@ class LiveDownloadSpike {
         const val MIN_BYTES = 20L * 1024
         const val MAX_BYTES = 5L * 1024 * 1024
 
-        const val MAX_ATTEMPTS = 2
+        /**
+         * Enough attempts to sample the peer population. Failures are fast (a few seconds), so
+         * breadth matters more than patience: if the downloader-opened path works with any
+         * meaningful share of clients, this will find one.
+         */
+        const val MAX_ATTEMPTS = 15
         const val CANDIDATE_WAIT_MS = 8_000
 
         /**
@@ -128,7 +133,7 @@ class LiveDownloadSpike {
          * indirect connection request after trying our (closed) port, so a short ceiling gives up
          * while the peer is still working.
          */
-        const val ATTEMPT_TIMEOUT_MS = 180_000L
+        const val ATTEMPT_TIMEOUT_MS = 60_000L
         const val TEST_TIMEOUT_MS = 600_000L
     }
 }

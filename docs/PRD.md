@@ -453,40 +453,37 @@ Without port forwarding or a relay — neither of which a casual mobile user wil
 reshare reachability is degraded. This sharpens D3's "reshare uptime is best-effort"
 conclusion, and is a further reason not to lean on reshare as a headline feature.
 
-### D12 — Downloads behind NAT: downloader opens the file connection · **Corrected**
+### D12 — Downloads do work behind NAT · **Settled by experiment**
 
-An earlier version of this entry concluded that downloads require an inbound-reachable port and
-therefore cannot work on mobile data. **That was wrong**, and it was wrong for a familiar
-reason: it was inferred from one line (`FileTransferInit(..., is_outgoing=True)`) instead of
-reading the connection logic.
+Two earlier versions of this entry reached opposite and **both wrong** conclusions — first that
+downloads require an inbound-reachable port, then that we had a local socket bug. The
+instruction to read the implementation was right; reasoning from it without an experiment was
+not.
 
-What `slskproto.py` actually does when sending a file message:
+**What settled it:** a control experiment with a known-good client — Nicotine+ 3.4.0.dev1
+(vendored by Sonosano), driven exactly the way Sonosano drives it, on this same NAT'd host with
+`upnp = False` and no port forwarding. It **downloaded a file in seconds**, with transfer states
+`Queued → Getting status → Transferring → Finished`.
 
-```python
-# Check if there's already a connection for the specified username
-if init_key in self._username_init_msgs:
-    init = self._username_init_msgs[init_key]
-...
-if init is not None:
-    "Sending message ... on existing connection"
-else:
-    "This is a new peer, initiate a connection"
-```
+Meanwhile our client, on the same host and network, failed 15 consecutive attempts.
 
-**The uploader reuses an existing connection if one is already there**, and only dials the
-downloader when there is none. A downloader-initiated `F` connection is therefore a supported,
-first-class path — which is what makes downloads viable from behind CGNAT.
+Conclusions:
 
-What matters is **ordering**: our `F` connection has to exist, and be registered peer-side,
-*before the peer handles our acceptance*. Opening it afterwards loses the race every time — the
-peer has already tried to dial us, failed, and sent `UploadFailed`.
+- **Downloads work from behind NAT, without UPnP and without a forwarded port.** The inbound-port
+  theory is dead. BitTorrent's model applies: the connection is established outward.
+- **The remaining problem is our implementation**, not connectivity, and not the platform. So a
+  phone on mobile data is a viable target — the PRD's premise survives.
+- We now have a **reproducible working reference** on this machine (~2 minutes to run), which is
+  what should have been built the moment a working client was identified.
 
-`SoulseekSession` now opens the file connection before accepting, with a short settle pause.
+**Confounds ruled out along the way:** UPnP (disabled), port forwarding (never configured),
+DNS, and credentials — all eliminated by running the control under identical conditions.
 
-**Current status: not yet working, but no longer a connectivity problem.** The live spike now
-fails with `SocketException: Socket closed` — the socket is being closed on **our** side while
-we wait for `FileTransferInit`, not reset by the peer. That is a local lifecycle bug to find,
-and it is a materially better place to be than an environmental dead end.
+**Method note, since it cost real time:** the first control run reported failure and would have
+"confirmed" the wrong answer. It was a missing `if __name__ == "__main__"` guard in my own
+driver, which stopped Nicotine+ spawning its worker. Three times in this session a broken
+instrument nearly produced a confident wrong conclusion. **A negative result from a control I
+wrote is not evidence until the control is itself verified against a known-positive case.**
 
-Earlier conclusions in this entry about CGNAT and "download at home only" do not follow, and
-`docs/connectivity.md` should be read with that in mind.
+**Next:** the connection trace from the working client (in progress) to identify the behaviour
+ours lacks — likely in how we advertise ourselves or in what we send during the handshake.
