@@ -16,6 +16,18 @@ class PeerSession(
     /** Blocks until the peer sends its next message. */
     fun read(): Message = Framing.PEER.read(socket.getInputStream())
 
+    /**
+     * How long [read] blocks before throwing `SocketTimeoutException`; 0 waits forever.
+     *
+     * Callers choose this: an idle peer connection is usually dead, but the right idle window
+     * depends on what the connection is for.
+     */
+    var readTimeoutMillis: Int
+        get() = socket.soTimeout
+        set(value) {
+            socket.soTimeout = value
+        }
+
     override fun close() {
         socket.close()
     }

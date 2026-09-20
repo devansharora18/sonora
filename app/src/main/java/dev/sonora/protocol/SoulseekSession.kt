@@ -1,0 +1,247 @@
+package dev.sonora.protocol
+
+import dev.sonora.protocol.peer.FileSearchResponse
+import dev.sonora.protocol.peer.PeerListener
+import dev.sonora.protocol.peer.PeerSession
+import dev.sonora.protocol.peer.PierceFireWall
+import dev.sonora.protocol.peer.SearchResponse
+import dev.sonora.protocol.server.ConnectToPeer
+import dev.sonora.protocol.server.FileSearch
+import dev.sonora.protocol.server.Login
+import dev.sonora.protocol.server.LoginResponse
+import dev.sonora.protocol.server.PeerAddress
+import dev.sonora.protocol.server.ServerConnection
+import dev.sonora.protocol.server.SetStatus
+import dev.sonora.protocol.server.SetWaitPort
+import dev.sonora.protocol.server.SharedFoldersFiles
+import java.io.Closeable
+import java.io.EOFException
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.net.SocketException
+import java.net.SocketTimeoutException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.concurrent.thread
+
+/**
+ * A live session with the Soulseek network.
+ *
+ * Owns the server connection, the inbound peer listener, and outbound peer connections, tying
+ * the message definitions together into something an application can drive: connect once,
+ * then search.
+ *
+ * Peer connections run in both directions on purpose. An inbound `PeerInit` means a peer
+ * reached us; a `ConnectToPeer` on the server connection means it could not, and expects us to
+ * dial out. Devices behind CGNAT — every phone on mobile data — only ever get the second case.
+ * See PRD D11.
+ *
+ * Callbacks and [onTrace] fire on internal threads, so they must not block.
+ */
+class SoulseekSession(
+    private val username: String,
+    private val password: String,
+    private val host: String = DEFAULT_HOST,
+    private val port: Int = DEFAULT_PORT,
+    private val listenPort: Int = SetWaitPort.DEFAULT_PORT,
+    /** Diagnostic sink: peer connection attempts and their outcome. Used by the live spikes. */
+    private val onTrace: (String) -> Unit = {},
+) : Closeable {
+
+    private val searches = ConcurrentHashMap<Long, (SearchResponse) -> Unit>()
+    private val nextToken = AtomicLong(1)
+    private val outboundPeers = ConcurrentHashMap.newKeySet<Socket>()
+
+    private var server: ServerConnection? = null
+    private var listener: PeerListener? = null
+
+    @Volatile
+    private var closed = false
+
+    val isConnected: Boolean get() = server != null && !closed
+
+    /**
+     * Connects, logs in, and completes the session handshake. Blocking.
+     *
+     * Returns the login response; a rejection (bad credentials) is a normal result rather than
+     * an exception. Throws only if the connection itself cannot be established.
+     */
+    fun connect(): LoginResponse {
+        check(server == null) { "already connected" }
+
+        val socket = Socket()
+        socket.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
+
+        val connection = ServerConnection(socket)
+        val response = try {
+            connection.send(
+                Login.CODE,
+                Login.request(username, password, MAJOR_VERSION, MINOR_VERSION),
+            )
+            Login.parse(connection.read().body)
+        } catch (e: Exception) {
+            connection.close()
+            throw e
+        }
+
+        if (response !is LoginResponse.Success) {
+            connection.close()
+            return response
+        }
+
+        val peerListener = PeerListener(listenPort, ::acceptPeer)
+        listener = peerListener
+
+        connection.send(SetWaitPort.CODE, SetWaitPort.request(peerListener.boundPort))
+        connection.send(SetStatus.CODE, SetStatus.request(SetStatus.ONLINE))
+        connection.send(SharedFoldersFiles.CODE, SharedFoldersFiles.request(0, 0))
+        connection.startReading(::onServerMessage)
+
+        server = connection
+        return response
+    }
+
+    /**
+     * Sends a search and routes every matching response to [onResponse]. Returns the token the
+     * results will carry.
+     *
+     * Results arrive asynchronously as peers answer, so [onResponse] fires on internal threads.
+     * The subscription lasts until [close]; there is no per-search cancellation yet.
+     */
+    fun search(query: String, onResponse: (SearchResponse) -> Unit): Long {
+        val connection = checkNotNull(server) { "not connected" }
+
+        val token = nextToken.getAndIncrement() and 0xFFFF_FFFFL
+        searches[token] = onResponse
+
+        connection.send(FileSearch.CODE, FileSearch.request(token, query))
+        return token
+    }
+
+    private fun onServerMessage(message: Message) {
+        if (message.code != ConnectToPeer.CODE) return
+
+        val address = ConnectToPeer.parse(message.body)
+        onTrace("relay ${address.username} ${address.ipAddress()}:${address.port}")
+
+        thread(name = "sonora-dial-${address.username}", isDaemon = true) {
+            try {
+                dialPeer(address) { onPeerMessage(address.username, it) }
+            } catch (e: Exception) {
+                // Sockets closed by our own shutdown are not failures — without this guard the
+                // trace is dominated by shutdown noise and says nothing about peer health.
+                if (!closed) {
+                    // Common and expected: many peers are behind NAT themselves and their
+                    // advertised port is unreachable. Only connection *establishment* failures
+                    // reach here — normal endings are handled inside dialPeer.
+                    onTrace("dial failed ${address.username}: ${e.javaClass.simpleName}: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
+     * Dials a peer that asked for an indirect connection and completes the handshake. Runs on
+     * its own thread so the server read loop keeps draining relays.
+     */
+    private fun dialPeer(address: PeerAddress, onMessage: (Message) -> Unit) {
+        val socket = Socket()
+        outboundPeers += socket
+
+        try {
+            socket.connect(
+                InetSocketAddress(address.ipAddress(), address.port.toInt()),
+                CONNECT_TIMEOUT_MS,
+            )
+            socket.soTimeout = PEER_IDLE_TIMEOUT_MS
+
+            Framing.PEER_INIT.write(
+                socket.getOutputStream(),
+                PierceFireWall.CODE,
+                PierceFireWall.request(address.token),
+            )
+
+            while (true) {
+                val message = try {
+                    Framing.PEER.read(socket.getInputStream())
+                } catch (_: SocketTimeoutException) {
+                    return // idle
+                } catch (_: EOFException) {
+                    return // peer finished and hung up
+                } catch (_: SocketException) {
+                    return // peer reset the connection, or we closed the socket on shutdown
+                }
+                onMessage(message)
+            }
+        } finally {
+            outboundPeers -= socket
+            socket.close()
+        }
+    }
+
+    private fun acceptPeer(session: PeerSession) {
+        onTrace("inbound ${session.username}")
+        readPeerMessages(session)
+    }
+
+    private fun readPeerMessages(session: PeerSession) {
+        thread(name = "sonora-read-${session.username}", isDaemon = true) {
+            try {
+                session.readTimeoutMillis = PEER_IDLE_TIMEOUT_MS
+                while (true) {
+                    onPeerMessage(session.username, session.read())
+                }
+            } catch (_: Exception) {
+                // Idle timeout, peer hung up, or framing desync — all end this connection.
+            } finally {
+                session.close()
+            }
+        }
+    }
+
+    private fun onPeerMessage(peer: String, message: Message) {
+        when (message.code) {
+            FileSearchResponse.CODE -> {
+                // The body is untrusted, so a malformed one must not end the connection.
+                val response = try {
+                    FileSearchResponse.parse(message.body)
+                } catch (_: Exception) {
+                    null
+                }
+
+                if (response != null) {
+                    onTrace("results ${response.files.size} from $peer")
+                    searches[response.token]?.invoke(response)
+                }
+            }
+
+            // Download and reshare messages land here once those exist.
+            else -> Unit
+        }
+    }
+
+    override fun close() {
+        closed = true
+        searches.clear()
+        listener?.close()
+        server?.close()
+        outboundPeers.forEach { it.close() }
+        outboundPeers.clear()
+        server = null
+    }
+
+    companion object {
+        const val DEFAULT_HOST = "server.slsknet.org"
+        const val DEFAULT_PORT = 2242
+
+        /**
+         * Major version 177 is the value reserved for experimental development and testing
+         * (docs/protocol-scope.md), so this does not impersonate an established client.
+         */
+        const val MAJOR_VERSION = 177
+        const val MINOR_VERSION = 1
+
+        private const val CONNECT_TIMEOUT_MS = 15_000
+        private const val PEER_IDLE_TIMEOUT_MS = 30_000
+    }
+}

@@ -20,8 +20,8 @@ internal object LiveServer {
     const val CONNECT_TIMEOUT_MS = 15_000
 
     /** Reserved for experimental development and testing — see docs/protocol-scope.md. */
-    const val MAJOR_VERSION = 177
-    const val MINOR_VERSION = 1
+    const val MAJOR_VERSION = SoulseekSession.MAJOR_VERSION
+    const val MINOR_VERSION = SoulseekSession.MINOR_VERSION
 
     const val DEFAULT_QUERY = "aphex twin"
 
