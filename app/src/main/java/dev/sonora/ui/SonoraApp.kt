@@ -15,6 +15,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -52,25 +54,47 @@ fun SonoraApp() {
     }
 
     when (val current = state) {
-        is BackendState.Connected -> Column(modifier = Modifier.fillMaxSize()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Sonora", style = MaterialTheme.typography.titleMedium)
-                TextButton(onClick = { SonoraBackend.disconnect(context) }) {
-                    Text("Disconnect")
+        is BackendState.Connected -> {
+            var tab by remember { mutableStateOf(MainTab.Search) }
+
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Sonora", style = MaterialTheme.typography.titleMedium)
+                    TextButton(onClick = { SonoraBackend.disconnect(context) }) {
+                        Text("Disconnect")
+                    }
+                }
+
+                TabRow(selectedTabIndex = tab.ordinal, modifier = Modifier.fillMaxWidth()) {
+                    MainTab.entries.forEach { entry ->
+                        Tab(
+                            selected = tab == entry,
+                            onClick = { tab = entry },
+                            text = { Text(entry.label) },
+                        )
+                    }
+                }
+
+                when (tab) {
+                    MainTab.Search -> SearchScreen()
+                    MainTab.Library -> LibraryScreen()
                 }
             }
-
-            SearchScreen()
         }
 
         else -> ConnectScreen(state = current)
     }
+}
+
+private enum class MainTab(val label: String) {
+    Search("Search"),
+    Library("Library"),
 }
 
 @Composable

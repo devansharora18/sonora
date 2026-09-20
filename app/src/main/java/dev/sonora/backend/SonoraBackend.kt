@@ -70,6 +70,29 @@ object SonoraBackend {
 
     val download: StateFlow<DownloadState> = _download.asStateFlow()
 
+    private val _library = MutableStateFlow<List<LibraryTrack>>(emptyList())
+
+    val library: StateFlow<List<LibraryTrack>> = _library.asStateFlow()
+
+    /**
+     * Rescans the download directory.
+     *
+     * The filesystem is the source of truth for what has been downloaded, so this is a scan
+     * rather than a stored index — nothing to keep in sync, nothing to go stale. That holds until
+     * a track is deleted outside the app; see PRD D5.
+     */
+    fun refreshLibrary(context: Context) {
+        scope.launch {
+            val directory = File(context.filesDir, DOWNLOAD_DIRECTORY)
+
+            _library.value = directory.listFiles()
+                ?.filter { it.isFile && it.extension.lowercase() in AUDIO_EXTENSIONS }
+                ?.sortedBy { it.name.lowercase() }
+                ?.map(LibraryTrack::from)
+                .orEmpty()
+        }
+    }
+
     /**
      * Downloads one search result into app-private storage.
      *
@@ -115,6 +138,10 @@ object SonoraBackend {
                     DownloadState.Completed(name, outcome.bytes, destination.absolutePath)
 
                 is DownloadOutcome.Failed -> DownloadState.Failed(name, outcome.reason)
+            }
+
+            if (outcome is DownloadOutcome.Completed) {
+                refreshLibrary(context)
             }
         }
     }
