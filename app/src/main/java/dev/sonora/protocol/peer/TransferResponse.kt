@@ -15,16 +15,16 @@ object TransferResponse {
     /**
      * Accepts the transfer.
      *
-     * Deliberately carries **no file size**. The prose spec lists one for a download response,
-     * but the reference implementation omits it and parses its own absence with a
-     * has-remaining-content guard — so sending a size risks disagreeing with every client that
-     * follows the implementation.
+     * [size] is optional. The prose spec lists a file size for a download response, but the
+     * reference implementation omits it and parses its own absence with a has-remaining-content
+     * guard. Sending it matches the spec; omitting it matches Nicotine+. Both are in use, so this
+     * is a parameter rather than a decision.
      */
-    fun accepted(token: Long): ByteArray =
-        MessageWriter()
-            .writeUInt32(token)
-            .writeBool(true)
-            .toByteArray()
+    fun accepted(token: Long, size: Long? = null): ByteArray {
+        val writer = MessageWriter().writeUInt32(token).writeBool(true)
+        size?.let { writer.writeUInt64(it) }
+        return writer.toByteArray()
+    }
 
     fun rejected(token: Long, reason: String): ByteArray =
         MessageWriter()

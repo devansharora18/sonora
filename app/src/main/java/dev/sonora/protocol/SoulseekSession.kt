@@ -37,6 +37,7 @@ import java.util.concurrent.RejectedExecutionHandler
 import java.util.concurrent.ThreadFactory
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 
@@ -73,6 +74,12 @@ class SoulseekSession(
      * over the whole transfer — a real client wants progress-aware policy rather than a timeout.
      */
     private val transferTimeoutMillis: Long = DEFAULT_TRANSFER_TIMEOUT_MS,
+    /**
+     * How long [download] waits for the peer's file connection before dialling the uploader
+     * itself. Some clients never open one when the downloader's port is closed, so waiting
+     * forever is not an option. See [initiateFileConnection].
+     */
+    private val fileConnectionFallbackMillis: Long = DEFAULT_FILE_CONNECTION_FALLBACK_MS,
     /** Diagnostic sink: peer connection attempts and their outcome. Used by the live spikes. */
     private val onTrace: (String) -> Unit = {},
 ) : Closeable {
@@ -250,19 +257,40 @@ class SoulseekSession(
      * The caller owns the returned session, and it is also closed with this session.
      */
     fun connectToUser(username: String): PeerSession? {
+        val address = resolveAddress(username) ?: return null
+        return dialDirect(username, address, PeerInit.TYPE_PEER)
+    }
+
+    private fun resolveAddress(username: String): UserAddress? {
         val connection = checkNotNull(server) { "not connected" }
 
         val pending = LinkedBlockingQueue<UserAddress>()
         pendingAddresses[username] = pending
 
-        val address = try {
+        return try {
             connection.send(GetPeerAddress.CODE, GetPeerAddress.request(username))
             pending.poll(ADDRESS_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         } finally {
             pendingAddresses.remove(username)
-        } ?: return null
+        }
+    }
 
-        return dialDirect(username, address)
+    /**
+     * Opens a file connection to the uploader ourselves.
+     *
+     * The spec says the uploader opens it, and usually it does — but that requires the uploader to
+     * reach us, and a phone behind CGNAT is not reachable. Peers demonstrably send indirect
+     * requests for `P` connections, but none have been observed doing so for `F`. Rather than wait
+     * forever, dial out — the direction that works from behind NAT.
+     */
+    private fun initiateFileConnection(username: String, transfer: PendingTransfer) {
+        if (transfer.isClaimed || closed) return
+
+        onTrace("no file connection from $username; dialling it ourselves")
+
+        val address = resolveAddress(username) ?: return
+        val session = dialDirect(username, address, PeerInit.TYPE_FILE) ?: return
+        handleFileConnection(session)
     }
 
     /**
@@ -273,7 +301,7 @@ class SoulseekSession(
      * peer to open a file connection, which arrives later through the normal peer paths.
      */
     fun requestDownload(username: String, filename: String): DownloadRequest =
-        negotiateDownload(username, filename) { }
+        negotiateDownload(username, filename, expectedSize = null) { }
 
     /**
      * Downloads a file to [destination]. Blocking: returns once the transfer completes or fails.
@@ -290,13 +318,24 @@ class SoulseekSession(
         val transfer = PendingTransfer(destination, size)
         var token: Long? = null
 
-        val negotiation = negotiateDownload(username, filename) { accepted ->
+        val negotiation = negotiateDownload(username, filename, expectedSize = size) { accepted ->
             token = accepted
             pendingTransfers[accepted] = transfer
         }
 
         if (negotiation !is DownloadRequest.Accepted) {
             return DownloadOutcome.Failed("the download request was not accepted")
+        }
+
+        // Some clients never open the file connection when the downloader cannot be reached, so
+        // dial them instead of waiting forever.
+        thread(name = "sonora-file-fallback", isDaemon = true) {
+            try {
+                Thread.sleep(fileConnectionFallbackMillis)
+                initiateFileConnection(username, transfer)
+            } catch (_: InterruptedException) {
+                // Session shutting down.
+            }
         }
 
         return try {
@@ -315,13 +354,14 @@ class SoulseekSession(
     private fun negotiateDownload(
         username: String,
         filename: String,
+        expectedSize: Long?,
         onAccepted: (token: Long) -> Unit,
     ): DownloadRequest {
         val peer = connectToUser(username) ?: return DownloadRequest.Unreachable
 
         return try {
             peer.send(QueueUpload.CODE, QueueUpload.request(filename))
-            awaitOffer(peer, filename, onAccepted)
+            awaitOffer(peer, filename, expectedSize, onAccepted)
         } catch (_: Exception) {
             // Peer hung up, went quiet, or answered with something unparseable.
             DownloadRequest.Unreachable
@@ -332,6 +372,7 @@ class SoulseekSession(
     private fun awaitOffer(
         peer: PeerSession,
         filename: String,
+        expectedSize: Long?,
         onAccepted: (token: Long) -> Unit,
     ): DownloadRequest {
         var outcome: DownloadRequest = DownloadRequest.Unreachable
@@ -351,7 +392,13 @@ class SoulseekSession(
             // it receives our acceptance, so the token has to be known by then.
             onAccepted(request.token)
 
-            peer.send(TransferResponse.CODE, TransferResponse.accepted(request.token))
+            // Echo the size we believe in — the caller's from the search result, since the peer
+            // reports 0 for files over 2 GB.
+            peer.send(
+                TransferResponse.CODE,
+                TransferResponse.accepted(request.token, expectedSize ?: request.size),
+            )
+
             outcome = DownloadRequest.Accepted(request.token, request.filename, request.size)
             break
         }
@@ -365,10 +412,18 @@ class SoulseekSession(
 
         try {
             val token = FileTransfer.readInitToken(session.inputStream())
-            transfer = pendingTransfers[token]
+            val pending = pendingTransfers[token]
+            transfer = pending
 
-            if (transfer == null) {
+            if (pending == null) {
                 onTrace("file connection with unknown token $token from ${session.username}")
+                return
+            }
+
+            // A peer may open a connection while our own dial is in flight; only one may drive
+            // the transfer, or both would write to the same file.
+            if (!pending.claim()) {
+                onTrace("duplicate file connection for token $token from ${session.username}")
                 return
             }
 
@@ -395,7 +450,11 @@ class SoulseekSession(
         }
     }
 
-    private fun dialDirect(username: String, address: UserAddress): PeerSession? {
+    private fun dialDirect(
+        username: String,
+        address: UserAddress,
+        connectionType: String,
+    ): PeerSession? {
         val socket = Socket()
         outboundPeers += socket
 
@@ -409,10 +468,10 @@ class SoulseekSession(
             Framing.PEER_INIT.write(
                 socket.getOutputStream(),
                 PeerInit.CODE,
-                PeerInit.request(username, PeerInit.TYPE_PEER),
+                PeerInit.request(username, connectionType),
             )
 
-            return PeerSession(username, PeerInit.TYPE_PEER, socket)
+            return PeerSession(username, connectionType, socket)
         } catch (_: Exception) {
             outboundPeers -= socket
             socket.close()
@@ -517,6 +576,12 @@ class SoulseekSession(
          * starts sending.
          */
         const val DEFAULT_TRANSFER_TIMEOUT_MS = 300_000L
+
+        /**
+         * How long to wait for the peer's own file connection before dialling the uploader
+         * ourselves. Well under the transfer timeout, because waiting is the failure mode.
+         */
+        const val DEFAULT_FILE_CONNECTION_FALLBACK_MS = 5_000L
     }
 }
 
@@ -524,8 +589,15 @@ class SoulseekSession(
 private class PendingTransfer(val destination: File, val size: Long) {
     val completion = CountDownLatch(1)
 
+    private val claimed = AtomicBoolean(false)
+
     @Volatile
     var outcome: DownloadOutcome? = null
+
+    /** Only one connection may drive a transfer — a peer may open one while our own dial is in flight. */
+    fun claim(): Boolean = claimed.compareAndSet(false, true)
+
+    val isClaimed: Boolean get() = claimed.get()
 }
 
 /** The outcome of a download. */

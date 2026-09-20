@@ -64,6 +64,17 @@ class PeerTransferTest {
     }
 
     @Test
+    fun `acceptance can carry a file size`() {
+        val body = TransferResponse.accepted(token = 1, size = 4096)
+
+        val reader = MessageReader(body)
+        assertEquals(1L, reader.readUInt32())
+        assertTrue(reader.readBool())
+        assertEquals(4096L, reader.readUInt64())
+        assertEquals(0, reader.remaining)
+    }
+
+    @Test
     fun `rejection carries the reason`() {
         val body = TransferResponse.rejected(token = 9, reason = "Cancelled")
 
