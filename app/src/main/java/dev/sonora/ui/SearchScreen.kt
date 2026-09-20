@@ -1,15 +1,18 @@
 package dev.sonora.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import dev.sonora.backend.DownloadState
 import dev.sonora.backend.SearchHit
 import dev.sonora.backend.SonoraBackend
+import dev.sonora.backend.SortMode
 
 @Composable
 fun SearchScreen() {
@@ -79,10 +83,26 @@ fun SearchScreen() {
             )
 
             else -> Text(
-                text = "${state.matched} match(es), showing ${state.hits.size}",
+                text = "${state.matched} match(es) from ${state.peers} peer(s), showing ${state.hits.size}",
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(vertical = 8.dp),
             )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SortMode.entries.forEach { mode ->
+                FilterChip(
+                    selected = state.sort == mode,
+                    onClick = { SonoraBackend.setSort(mode) },
+                    label = { Text(mode.label) },
+                )
+            }
         }
 
         DownloadStatus(download)
@@ -164,8 +184,29 @@ private fun ResultRow(hit: SearchHit, onDownload: () -> Unit) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+
+        Text(
+            text = transfer(hit),
+            style = MaterialTheme.typography.bodySmall,
+            color = when {
+                hit.hasFreeUploadSlot -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
+
+/**
+ * The signals that decide how fast a transfer from this peer would be: whether it can start now,
+ * how far back we would be queued, and how quickly it has uploaded before.
+ */
+private fun transfer(hit: SearchHit): String = buildList {
+    add(if (hit.hasFreeUploadSlot) "slot free" else "no slot")
+    if (hit.queueLength > 0) add("queued ${hit.queueLength}")
+    hit.averageSpeed.takeIf { it > 0 }?.let { add("${formatSize(it)}/s") }
+}.joinToString("  \u00b7  ")
 
 private fun formatSize(bytes: Long): String = when {
     bytes >= 1_048_576 -> "%.1f MB".format(bytes / 1_048_576.0)

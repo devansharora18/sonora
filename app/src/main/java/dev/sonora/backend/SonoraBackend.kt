@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Owns the Soulseek session and publishes its state to the UI.
@@ -152,6 +153,8 @@ object SonoraBackend {
         val tokens = query.lowercase().split(WHITESPACE).filter { it.isNotEmpty() }
         if (tokens.isEmpty()) return
 
+        val peersSeen = ConcurrentHashMap.newKeySet<String>()
+
         _search.value = SearchState(query = query, searching = true)
         Log.d(TAG, "searching: $query")
 
@@ -161,33 +164,74 @@ object SonoraBackend {
                 val audio = response.files.filter { isAudio(it.filename) }
                 if (audio.isEmpty()) return@search
 
+                peersSeen += response.username
+
                 val incoming = audio.map {
-                    SearchHit(response.username, it.filename, it.size, it.attributes)
+                    SearchHit(
+                        peer = response.username,
+                        filename = it.filename,
+                        size = it.size,
+                        attributes = it.attributes,
+                        averageSpeed = response.averageSpeed,
+                        hasFreeUploadSlot = response.hasFreeUploadSlot,
+                        queueLength = response.queueLength,
+                    )
                 }
 
                 _search.update { state ->
                     // A response for an earlier query can still arrive; drop it.
                     if (state.query != query) return@update state
 
-                    // Ranked for relevance rather than arrival order: peers answer in whatever
-                    // order they like, so without this the first reply wins regardless of how
-                    // well it matches. Deduped because a peer can send more than one response,
-                    // and duplicate list keys would crash the UI.
-                    val ranked = (state.hits + incoming)
+                    // Deduped because a peer can send more than one response, and duplicate list
+                    // keys would crash the UI.
+                    val candidates = (state.hits + incoming)
                         .distinctBy { it.peer to it.filename }
-                        .map { it to relevance(it, tokens) }
-                        .filter { (_, score) -> score > 0 }
-                        .sortedByDescending { (_, score) -> score }
-                        .map { (hit, _) -> hit }
-                        .take(MAX_RETAINED_HITS)
+                        .filter { relevance(it, tokens) > 0 }
 
-                    state.copy(hits = ranked, matched = ranked.size)
+                    state.copy(
+                        hits = order(candidates, tokens, state.sort).take(MAX_RETAINED_HITS),
+                        matched = candidates.size,
+                        peers = peersSeen.size,
+                    )
                 }
             }
 
             delay(SEARCH_WINDOW_MS)
             _search.update { if (it.query == query) it.copy(searching = false) else it }
         }
+    }
+
+    /** Changes the result ordering, re-sorting what has already arrived. */
+    fun setSort(mode: SortMode) {
+        _search.update { state ->
+            if (state.sort == mode) return@update state
+
+            val tokens = state.query.lowercase().split(WHITESPACE).filter { it.isNotEmpty() }
+            state.copy(sort = mode, hits = order(state.hits, tokens, mode))
+        }
+    }
+
+    private fun order(
+        hits: List<SearchHit>,
+        tokens: List<String>,
+        mode: SortMode,
+    ): List<SearchHit> = when (mode) {
+        // Relevance needs the tokens, so this is the only mode that is not a plain key.
+        SortMode.RELEVANCE -> hits.sortedByDescending { relevance(it, tokens) }
+
+        // Unknown speeds sort last rather than first: zero means "not reported", not "slowest".
+        SortMode.SPEED -> hits.sortedByDescending { if (it.averageSpeed > 0) it.averageSpeed else -1 }
+
+        SortMode.AVAILABILITY -> hits.sortedWith(
+            compareByDescending<SearchHit> { it.hasFreeUploadSlot }.thenBy { it.queueLength },
+        )
+
+        SortMode.QUALITY -> hits.sortedByDescending {
+            (it.attributes.sampleRateHz ?: 0) * (it.attributes.bitDepth ?: 0) +
+                (it.attributes.bitrateKbps ?: 0)
+        }
+
+        SortMode.SIZE -> hits.sortedByDescending { it.size }
     }
 
     /**
