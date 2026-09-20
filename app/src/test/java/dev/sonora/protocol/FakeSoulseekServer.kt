@@ -103,14 +103,19 @@ internal class FakeSoulseekServer(
      * Pushes a `ConnectToPeer` relay, as the server does when a peer cannot reach us directly.
      * Every relay points at loopback, so the session's dial-back lands on [FakePeer].
      */
-    fun relay(username: String, peerPort: Int, token: Long) {
+    fun relay(
+        username: String,
+        peerPort: Int,
+        token: Long,
+        type: String = PeerInit.TYPE_PEER,
+    ) {
         val connection = checkNotNull(connection) { "no client connected yet" }
 
         connection.send(
             ConnectToPeer.CODE,
             MessageWriter()
                 .writeString(username)
-                .writeString(PeerInit.TYPE_PEER)
+                .writeString(type)
                 .writeUInt32(LOOPBACK_IP)
                 .writeUInt32(peerPort.toLong())
                 .writeUInt32(token)

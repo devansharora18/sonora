@@ -3,6 +3,8 @@ package dev.sonora.protocol.peer
 import dev.sonora.protocol.Framing
 import dev.sonora.protocol.Message
 import java.io.Closeable
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.Socket
 
 /** A peer connection that has completed its [PeerInit] handshake. */
@@ -20,6 +22,14 @@ class PeerSession(
     fun send(code: Long, body: ByteArray) {
         Framing.PEER.write(socket.getOutputStream(), code, body)
     }
+
+    /**
+     * Raw streams, for the file-transfer path. File messages use their own framing — no length
+     * prefix and no code — so [read] and [send] do not apply there.
+     */
+    fun inputStream(): InputStream = socket.getInputStream()
+
+    fun outputStream(): OutputStream = socket.getOutputStream()
 
     /**
      * How long [read] blocks before throwing `SocketTimeoutException`; 0 waits forever.

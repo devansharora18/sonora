@@ -1,6 +1,7 @@
 package dev.sonora.protocol
 
 import dev.sonora.protocol.peer.FileSearchResponse
+import dev.sonora.protocol.peer.FileTransfer
 import dev.sonora.protocol.peer.PeerInit
 import dev.sonora.protocol.peer.PeerListener
 import dev.sonora.protocol.peer.PeerSession
@@ -22,6 +23,7 @@ import dev.sonora.protocol.server.SharedFoldersFiles
 import dev.sonora.protocol.server.UserAddress
 import java.io.Closeable
 import java.io.EOFException
+import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketException
@@ -29,6 +31,7 @@ import java.net.SocketTimeoutException
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.BlockingQueue
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.RejectedExecutionHandler
 import java.util.concurrent.ThreadFactory
@@ -73,6 +76,7 @@ class SoulseekSession(
     private val nextToken = AtomicLong(1)
     private val outboundPeers = ConcurrentHashMap.newKeySet<Socket>()
     private val pendingAddresses = ConcurrentHashMap<String, BlockingQueue<UserAddress>>()
+    private val pendingTransfers = ConcurrentHashMap<Long, PendingTransfer>()
 
     private val dials = ThreadPoolExecutor(
         maxConcurrentPeers,
@@ -204,6 +208,14 @@ class SoulseekSession(
                 PierceFireWall.request(address.token),
             )
 
+            if (address.connectionType == PeerInit.TYPE_FILE) {
+                // File connections use their own framing entirely, so they take a separate path.
+                handleFileConnection(
+                    PeerSession(address.username, address.connectionType, socket),
+                )
+                return
+            }
+
             while (true) {
                 val message = try {
                     Framing.PEER.read(socket.getInputStream())
@@ -255,12 +267,56 @@ class SoulseekSession(
      * The transfer itself is not handled here — accepting a [TransferRequest] only tells the
      * peer to open a file connection, which arrives later through the normal peer paths.
      */
-    fun requestDownload(username: String, filename: String): DownloadRequest {
+    fun requestDownload(username: String, filename: String): DownloadRequest =
+        negotiateDownload(username, filename) { }
+
+    /**
+     * Downloads a file to [destination]. Blocking: returns once the transfer completes or fails.
+     *
+     * [size] should come from the original search result rather than the peer's offer, because
+     * SoulseekQt reports 0 for files over 2 GB.
+     */
+    fun download(
+        username: String,
+        filename: String,
+        destination: File,
+        size: Long,
+    ): DownloadOutcome {
+        val transfer = PendingTransfer(destination, size)
+        var token: Long? = null
+
+        val negotiation = negotiateDownload(username, filename) { accepted ->
+            token = accepted
+            pendingTransfers[accepted] = transfer
+        }
+
+        if (negotiation !is DownloadRequest.Accepted) {
+            return DownloadOutcome.Failed("the download request was not accepted")
+        }
+
+        return try {
+            if (!transfer.completion.await(TRANSFER_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                DownloadOutcome.Failed("the peer never opened a file connection")
+            } else {
+                transfer.outcome ?: DownloadOutcome.Failed("the transfer ended without a result")
+            }
+        } catch (_: InterruptedException) {
+            DownloadOutcome.Failed("interrupted")
+        } finally {
+            token?.let { pendingTransfers.remove(it) }
+        }
+    }
+
+    private fun negotiateDownload(
+        username: String,
+        filename: String,
+        onAccepted: (token: Long) -> Unit,
+    ): DownloadRequest {
         val peer = connectToUser(username) ?: return DownloadRequest.Unreachable
 
         return try {
             peer.send(QueueUpload.CODE, QueueUpload.request(filename))
-            awaitOffer(peer, filename)
+            awaitOffer(peer, filename, onAccepted)
         } catch (_: Exception) {
             // Peer hung up, went quiet, or answered with something unparseable.
             DownloadRequest.Unreachable
@@ -268,7 +324,11 @@ class SoulseekSession(
     }
 
     /** Reads until the peer offers [filename], then accepts it. */
-    private fun awaitOffer(peer: PeerSession, filename: String): DownloadRequest {
+    private fun awaitOffer(
+        peer: PeerSession,
+        filename: String,
+        onAccepted: (token: Long) -> Unit,
+    ): DownloadRequest {
         var outcome: DownloadRequest = DownloadRequest.Unreachable
 
         while (true) {
@@ -282,12 +342,52 @@ class SoulseekSession(
             if (request.direction != TransferRequest.DIRECTION_UPLOAD) continue
             if (request.filename != filename) continue
 
+            // Registered before we accept: the uploader may open the file connection the instant
+            // it receives our acceptance, so the token has to be known by then.
+            onAccepted(request.token)
+
             peer.send(TransferResponse.CODE, TransferResponse.accepted(request.token))
             outcome = DownloadRequest.Accepted(request.token, request.filename, request.size)
             break
         }
 
         return outcome
+    }
+
+    /** Receives a file over an established `F` connection and completes the pending transfer. */
+    private fun handleFileConnection(session: PeerSession) {
+        var transfer: PendingTransfer? = null
+
+        try {
+            val token = FileTransfer.readInitToken(session.inputStream())
+            transfer = pendingTransfers[token]
+
+            if (transfer == null) {
+                onTrace("file connection with unknown token $token from ${session.username}")
+                return
+            }
+
+            onTrace("receiving ${transfer.size} bytes from ${session.username}")
+            FileTransfer.requestFrom(session.outputStream(), offset = 0)
+
+            transfer.destination.parentFile?.mkdirs()
+            val written = transfer.destination.outputStream().use { destination ->
+                FileTransfer.copyBytes(session.inputStream(), destination, transfer.size)
+            }
+
+            transfer.outcome = if (written == transfer.size) {
+                DownloadOutcome.Completed(written)
+            } else {
+                // Resumable: the caller keeps the partial file and can retry from `written`.
+                DownloadOutcome.Failed("truncated: $written of ${transfer.size} bytes")
+            }
+        } catch (e: Exception) {
+            onTrace("file connection failed from ${session.username}: ${e.javaClass.simpleName}")
+            transfer?.outcome = DownloadOutcome.Failed("${e.javaClass.simpleName}: ${e.message}")
+        } finally {
+            session.close()
+            transfer?.completion?.countDown()
+        }
     }
 
     private fun dialDirect(username: String, address: UserAddress): PeerSession? {
@@ -321,8 +421,15 @@ class SoulseekSession(
     }
 
     private fun acceptPeer(session: PeerSession) {
-        onTrace("inbound ${session.username}")
-        readPeerMessages(session)
+        onTrace("inbound ${session.username} ${session.connectionType}")
+
+        if (session.connectionType == PeerInit.TYPE_FILE) {
+            thread(name = "sonora-file-${session.username}", isDaemon = true) {
+                handleFileConnection(session)
+            }
+        } else {
+            readPeerMessages(session)
+        }
     }
 
     private fun readPeerMessages(session: PeerSession) {
@@ -399,7 +506,33 @@ class SoulseekSession(
         private const val CONNECT_TIMEOUT_MS = 15_000
         private const val PEER_IDLE_TIMEOUT_MS = 30_000
         private const val ADDRESS_TIMEOUT_MS = 10_000L
+
+        /**
+         * How long [download] waits for the peer to open a file connection and finish sending.
+         * A real client wants a progress-aware policy here rather than one generous ceiling.
+         */
+        private const val TRANSFER_TIMEOUT_MS = 300_000L
     }
+}
+
+/** A download waiting for its file connection, matched up by transfer token. */
+private class PendingTransfer(val destination: File, val size: Long) {
+    val completion = CountDownLatch(1)
+
+    @Volatile
+    var outcome: DownloadOutcome? = null
+}
+
+/** The outcome of a download. */
+sealed interface DownloadOutcome {
+
+    data class Completed(val bytes: Long) : DownloadOutcome
+
+    /**
+     * Kept deliberately coarse. A short read leaves a partial file on disk, which is resumable
+     * rather than lost, so the message says enough to resume without pretending to be a taxonomy.
+     */
+    data class Failed(val reason: String) : DownloadOutcome
 }
 
 /** The outcome of asking a peer for a file. */

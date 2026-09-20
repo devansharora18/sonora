@@ -1,5 +1,6 @@
 package dev.sonora.protocol
 
+import dev.sonora.protocol.peer.FileTransfer
 import dev.sonora.protocol.peer.PeerInit
 import dev.sonora.protocol.peer.PeerSession
 import dev.sonora.protocol.peer.SearchResponse
@@ -11,8 +12,12 @@ import dev.sonora.protocol.server.LoginResponse
 import dev.sonora.protocol.server.SetStatus
 import dev.sonora.protocol.server.SetWaitPort
 import dev.sonora.protocol.server.SharedFoldersFiles
+import java.io.File
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.concurrent.thread
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -245,6 +250,73 @@ class SoulseekSessionTest {
         }
     }
 
+    @Test(timeout = 30_000)
+    fun `download receives the file over a relayed file connection`() {
+        val payload = ByteArray(50_000) { (it % 251).toByte() }
+        val connections = AtomicInteger()
+
+        FakePeer(
+            conversation = { peer ->
+                when (connections.incrementAndGet()) {
+                    // 1. The direct P connection we ask for the file on.
+                    1 -> {
+                        peer.read() // QueueUpload
+                        peer.send(
+                            TransferRequest.CODE,
+                            MessageWriter()
+                                .writeUInt32(TransferRequest.DIRECTION_UPLOAD)
+                                .writeUInt32(TRANSFER_TOKEN)
+                                .writeString("track.flac")
+                                .writeUInt64(payload.size.toLong())
+                                .toByteArray(),
+                        )
+                        peer.read() // TransferResponse
+                    }
+
+                    // 2. The relayed F connection the uploader opens to send the bytes.
+                    else -> {
+                        peer.outputStream().write(FileTransfer.Init.encode(TRANSFER_TOKEN))
+                        peer.outputStream().flush()
+                        peer.inputStream().readExactly(FileTransfer.Offset.BYTES) // our offset
+                        peer.outputStream().write(payload)
+                        peer.outputStream().flush()
+                    }
+                }
+            },
+        ).use { peer ->
+            FakeSoulseekServer().use { server ->
+                server.peerPort = peer.port
+
+                session(server).use { session ->
+                    session.connect()
+
+                    val destination = File.createTempFile("sonora-download", ".bin")
+                    destination.deleteOnExit()
+
+                    val outcome = LinkedBlockingQueue<DownloadOutcome>()
+                    thread(isDaemon = true) {
+                        outcome.put(
+                            session.download(
+                                "some_peer",
+                                "track.flac",
+                                destination,
+                                payload.size.toLong(),
+                            ),
+                        )
+                    }
+
+                    // Once the negotiation is done, the uploader relays a file connection back.
+                    assertTrue(peer.awaitConnectionType(PeerInit.TYPE_PEER))
+                    server.relay("some_peer", peer.port, token = 1L, type = PeerInit.TYPE_FILE)
+
+                    val result = outcome.poll(20, TimeUnit.SECONDS)
+                    assertEquals(DownloadOutcome.Completed(payload.size.toLong()), result)
+                    assertArrayEquals(payload, destination.readBytes())
+                }
+            }
+        }
+    }
+
     private fun session(
         server: FakeSoulseekServer,
         maxConcurrentPeers: Int = SoulseekSession.DEFAULT_MAX_CONCURRENT_PEERS,
@@ -257,4 +329,8 @@ class SoulseekSessionTest {
         listenPort = 0,
         maxConcurrentPeers = maxConcurrentPeers,
     )
+
+    private companion object {
+        const val TRANSFER_TOKEN = 4242L
+    }
 }
