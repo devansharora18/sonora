@@ -1,0 +1,22 @@
+[versions]
+# AGP 9 bundles its own Kotlin Gradle plugin (KGP). `kotlin` below must match the
+# version AGP ships, or the Compose compiler plugin will conflict. AGP 9.4.1 -> KGP 2.2.10.
+agp = "9.4.1"
+kotlin = "2.2.10"
+
+# Compose 1.12+ requires compileSdk 37 (see app/build.gradle.kts).
+composeBom = "2026.09.00"
+
+coreKtx = "1.19.0"
+activityCompose = "1.13.0"
+
+[libraries]
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+androidx-compose-ui = { module = "androidx.compose.ui:ui" }
+androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

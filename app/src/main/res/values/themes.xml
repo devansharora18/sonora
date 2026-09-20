@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Window theme only; all in-app styling comes from Compose (ui/theme). -->
+    <style name="Theme.Sonora" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
