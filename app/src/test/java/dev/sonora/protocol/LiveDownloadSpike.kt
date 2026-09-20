@@ -120,9 +120,15 @@ class LiveDownloadSpike {
         const val MIN_BYTES = 20L * 1024
         const val MAX_BYTES = 5L * 1024 * 1024
 
-        const val MAX_ATTEMPTS = 3
+        const val MAX_ATTEMPTS = 2
         const val CANDIDATE_WAIT_MS = 8_000
-        const val ATTEMPT_TIMEOUT_MS = 60_000L
-        const val TEST_TIMEOUT_MS = 420_000L
+
+        /**
+         * Deliberately generous. The reference notes clients can take ~30s to fall back to an
+         * indirect connection request after trying our (closed) port, so a short ceiling gives up
+         * while the peer is still working.
+         */
+        const val ATTEMPT_TIMEOUT_MS = 180_000L
+        const val TEST_TIMEOUT_MS = 600_000L
     }
 }
