@@ -1,5 +1,7 @@
 package dev.sonora.protocol
 
+import dev.sonora.protocol.peer.PeerInit
+import dev.sonora.protocol.server.ConnectToPeer
 import dev.sonora.protocol.server.Login
 import dev.sonora.protocol.server.LoginResponse
 import dev.sonora.protocol.server.ServerConnection
@@ -81,6 +83,28 @@ internal class FakeSoulseekServer(
         }
     }
 
+    /**
+     * Pushes a `ConnectToPeer` relay, as the server does when a peer cannot reach us directly.
+     * Every relay points at loopback, so the session's dial-back lands on [FakePeer].
+     */
+    fun relay(username: String, peerPort: Int, token: Long) {
+        val connection = checkNotNull(connection) { "no client connected yet" }
+
+        connection.send(
+            ConnectToPeer.CODE,
+            MessageWriter()
+                .writeString(username)
+                .writeString(PeerInit.TYPE_PEER)
+                .writeUInt32(LOOPBACK_IP)
+                .writeUInt32(peerPort.toLong())
+                .writeUInt32(token)
+                .writeBool(false)
+                .writeUInt32(0) // obfuscation type
+                .writeUInt32(0) // obfuscated port
+                .toByteArray(),
+        )
+    }
+
     override fun close() {
         connection?.close()
         client?.close()
@@ -105,6 +129,9 @@ internal class FakeSoulseekServer(
 
     companion object {
         const val DEFAULT_TIMEOUT_MS = 5_000L
+
+        /** Loopback (127.0.0.1) packed the way the wire does it. */
+        const val LOOPBACK_IP = 0x7F00_0001L
 
         val DEFAULT_RESPONSE = LoginResponse.Success(
             greeting = "welcome",

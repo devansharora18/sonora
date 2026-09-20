@@ -71,7 +71,12 @@ class SoulseekSession(
         0L,
         TimeUnit.MILLISECONDS,
         ArrayBlockingQueue(DIAL_QUEUE_CAPACITY),
-        ThreadFactory { runnable -> thread(isDaemon = true, name = "sonora-dial") { runnable.run() } },
+        // Must return an *unstarted* thread — ThreadPoolExecutor starts it itself. Kotlin's
+        // thread(...) helper starts immediately, which silently breaks the pool's accounting
+        // and lets every task run concurrently.
+        ThreadFactory { runnable ->
+            Thread(runnable, "sonora-dial").apply { isDaemon = true }
+        },
         RejectedExecutionHandler { _, _ -> onTrace("relay dropped: dial queue full") },
     )
 

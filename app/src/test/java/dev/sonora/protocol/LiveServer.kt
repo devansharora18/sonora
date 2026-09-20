@@ -12,6 +12,9 @@ import org.junit.Assume.assumeTrue
  *
  * Credentials come from the environment and are never committed. Each spike skips itself
  * when they are absent, so a normal build never touches the network.
+ *
+ * Note: a reused Gradle daemon can lose the caller's environment, in which case the spikes
+ * report as skipped instead of running. Run `./gradlew --stop` first if that happens.
  */
 internal object LiveServer {
 

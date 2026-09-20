@@ -1,10 +1,14 @@
 package dev.sonora.protocol
 
+import dev.sonora.protocol.peer.SearchResponse
+import dev.sonora.protocol.peer.SearchWire
 import dev.sonora.protocol.server.FileSearch
 import dev.sonora.protocol.server.LoginResponse
 import dev.sonora.protocol.server.SetStatus
 import dev.sonora.protocol.server.SetWaitPort
 import dev.sonora.protocol.server.SharedFoldersFiles
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -83,12 +87,83 @@ class SoulseekSessionTest {
         }
     }
 
-    private fun session(server: FakeSoulseekServer) = SoulseekSession(
+    @Test
+    fun `a relayed peer is dialled and its results routed to the search`() {
+        // The peer answers the dial-back handshake with a search result.
+        FakePeer(
+            reply = { token ->
+                SearchWire.zlib(
+                    SearchWire.searchResponseBody(
+                        username = "remote_peer",
+                        token = token,
+                        files = listOf(SearchWire.fileEntry("track.flac", 1234, emptyMap())),
+                    ),
+                )
+            },
+        ).use { peer ->
+            FakeSoulseekServer().use { server ->
+                session(server).use { session ->
+                    session.connect()
+
+                    val results = LinkedBlockingQueue<SearchResponse>()
+                    val token = session.search("query") { results += it }
+
+                    // The server says a peer could not reach us and expects us to dial out.
+                    server.relay("remote_peer", peer.port, token)
+
+                    val response = results.poll(5, TimeUnit.SECONDS)
+                        ?: error("no search response was routed to the callback")
+
+                    assertEquals(token, response.token)
+                    assertEquals("remote_peer", response.username)
+
+                    val file = response.files.single()
+                    assertEquals("track.flac", file.filename)
+                    assertEquals(1234L, file.size)
+
+                    assertTrue("peer never saw the handshake", peer.tokens.contains(token))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `never dials more peers at once than the configured ceiling`() {
+        val limit = 3
+        val relays = 12
+
+        // Holding connections open is what makes concurrent dials observable at all.
+        FakePeer(holdOpen = true).use { peer ->
+            FakeSoulseekServer().use { server ->
+                session(server, maxConcurrentPeers = limit).use { session ->
+                    session.connect()
+                    session.search("query") { }
+
+                    repeat(relays) { server.relay("peer$it", peer.port, token = 1L) }
+
+                    assertTrue(
+                        "expected the pool to reach $limit concurrent dials",
+                        peer.awaitConcurrency(limit, timeoutMillis = 10_000),
+                    )
+
+                    // A single assertion covers both halves: reaching the ceiling, and never
+                    // exceeding it. A larger peak fails here just as a smaller one does.
+                    assertEquals(limit, peer.peakConcurrency)
+                }
+            }
+        }
+    }
+
+    private fun session(
+        server: FakeSoulseekServer,
+        maxConcurrentPeers: Int = SoulseekSession.DEFAULT_MAX_CONCURRENT_PEERS,
+    ) = SoulseekSession(
         username = "test_user",
         password = "test_password",
         host = "127.0.0.1",
         port = server.port,
         // Ephemeral: the peer listener must not collide with anything on the test machine.
         listenPort = 0,
+        maxConcurrentPeers = maxConcurrentPeers,
     )
 }
