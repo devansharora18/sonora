@@ -318,7 +318,7 @@ class SoulseekSessionTest {
     }
 
     @Test(timeout = 30_000)
-    fun `download dials the uploader when the peer never opens a file connection`() {
+    fun `download opens the file connection itself before accepting`() {
         val payload = ByteArray(20_000) { (it % 251).toByte() }
         val connections = AtomicInteger()
 
@@ -340,7 +340,9 @@ class SoulseekSessionTest {
                         peer.read() // TransferResponse
                     }
 
-                    // 2. The F connection WE open, because the peer never did.
+                    // 2. The F connection we opened ourselves, before accepting. Modelled the
+                    //    way the reference behaves: the uploader sends FileTransferInit over an
+                    //    existing connection rather than dialling out.
                     else -> {
                         peer.outputStream().write(FileTransfer.Init.encode(TRANSFER_TOKEN))
                         peer.outputStream().flush()
@@ -354,13 +356,14 @@ class SoulseekSessionTest {
             FakeSoulseekServer().use { server ->
                 server.peerPort = peer.port
 
-                session(server, fileConnectionFallbackMillis = 200).use { session ->
+                // The relayed fallback is disabled and the server sends no relay, so the only
+                // way this can complete is a file connection we opened ourselves.
+                session(server).use { session ->
                     session.connect()
 
-                    val destination = File.createTempFile("sonora-fallback", ".bin")
+                    val destination = File.createTempFile("sonora-preopen", ".bin")
                     destination.deleteOnExit()
 
-                    // No relay is sent: the only way this can complete is our own dial-out.
                     val outcome = session.download(
                         "some_peer",
                         "track.flac",
@@ -370,6 +373,10 @@ class SoulseekSessionTest {
 
                     assertEquals(DownloadOutcome.Completed(payload.size.toLong()), outcome)
                     assertArrayEquals(payload, destination.readBytes())
+                    assertTrue(
+                        "we should have opened an F connection ourselves",
+                        peer.directConnectionTypes.contains(PeerInit.TYPE_FILE),
+                    )
                 }
             }
         }

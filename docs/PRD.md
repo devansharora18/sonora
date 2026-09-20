@@ -453,31 +453,40 @@ Without port forwarding or a relay — neither of which a casual mobile user wil
 reshare reachability is degraded. This sharpens D3's "reshare uptime is best-effort"
 conclusion, and is a further reason not to lean on reshare as a headline feature.
 
-### D12 — Downloads may require an inbound-reachable port · **Open — significant risk**
+### D12 — Downloads behind NAT: downloader opens the file connection · **Corrected**
 
-Live testing could not complete a single download. What was established:
+An earlier version of this entry concluded that downloads require an inbound-reachable port and
+therefore cannot work on mobile data. **That was wrong**, and it was wrong for a familiar
+reason: it was inferred from one line (`FileTransferInit(..., is_outgoing=True)`) instead of
+reading the connection logic.
 
-- Download **negotiation** works live: resolve the uploader's address, dial them, `QueueUpload`,
-  receive their `TransferRequest`, accept it.
-- Peers then send **`UploadFailed` (P 46) within seconds** — they abandon the transfer.
-- Across four attempts and several hypotheses, **no peer ever opened an `F` connection**, and
-  none sent an indirect `ConnectToPeer` request for one — 0 `F` relays against 8636 `P` relays
-  in the same session.
-- Dialling the uploader ourselves is accepted, then reset.
+What `slskproto.py` actually does when sending a file message:
 
-This host has no inbound reachability (D11), so the uploader has no port to connect to. Two
-things make that the leading explanation rather than a certainty: the peer abandons far faster
-than a TCP timeout would take, and we have not tested from a network with an open port.
+```python
+# Check if there's already a connection for the specified username
+if init_key in self._username_init_msgs:
+    init = self._username_init_msgs[init_key]
+...
+if init is not None:
+    "Sending message ... on existing connection"
+else:
+    "This is a new peer, initiate a connection"
+```
 
-**Why this matters more than D11 did.** If downloads genuinely need an inbound-reachable port,
-then the app **cannot download on mobile data at all** — carriers use CGNAT, so a phone will
-never have one. Search would work and downloading would not, on the primary target platform.
-That is a product-level problem, not an implementation detail.
+**The uploader reuses an existing connection if one is already there**, and only dials the
+downloader when there is none. A downloader-initiated `F` connection is therefore a supported,
+first-class path — which is what makes downloads viable from behind CGNAT.
 
-**Unresolved.** To settle it: reproduce on a network with a forwarded port (if it then works,
-reachability is confirmed); or test against a local `soulfind` server; or re-examine our client
-identity — major version 177 is the *experimental* value, and while peers should not care, that
-is unverified.
+What matters is **ordering**: our `F` connection has to exist, and be registered peer-side,
+*before the peer handles our acceptance*. Opening it afterwards loses the race every time — the
+peer has already tried to dial us, failed, and sent `UploadFailed`.
 
-**Fixed along the way:** we ignored `UploadFailed` after accepting, so a transfer the peer had
-already abandoned presented as a three-minute timeout instead of an immediate, accurate failure.
+`SoulseekSession` now opens the file connection before accepting, with a short settle pause.
+
+**Current status: not yet working, but no longer a connectivity problem.** The live spike now
+fails with `SocketException: Socket closed` — the socket is being closed on **our** side while
+we wait for `FileTransferInit`, not reset by the peer. That is a local lifecycle bug to find,
+and it is a materially better place to be than an environmental dead end.
+
+Earlier conclusions in this entry about CGNAT and "download at home only" do not follow, and
+`docs/connectivity.md` should be read with that in mind.

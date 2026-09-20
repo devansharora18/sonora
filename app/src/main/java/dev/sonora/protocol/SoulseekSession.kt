@@ -324,6 +324,28 @@ class SoulseekSession(
             token = accepted
             pendingTransfers[accepted] = transfer
             watchNegotiationConnection(peer, transfer)
+
+            // Open the file connection *before* accepting.
+            //
+            // The uploader only sends `FileTransferInit` over an existing connection: it looks
+            // for one when it handles our acceptance, and if there is none it dials us instead —
+            // which fails from behind NAT, and the transfer dies. Accepting first loses that race
+            // every time, so the connection has to be up before the acceptance goes out.
+            val address = resolveAddress(username)
+            val fileSession = address?.let { dialDirect(username, it, PeerInit.TYPE_FILE) }
+
+            if (fileSession == null) {
+                onTrace("could not pre-open a file connection to $username")
+            } else {
+                // Give the peer a moment to register the inbound connection before we accept.
+                // It only reuses a connection it already knows about when it handles our
+                // acceptance, and our PeerInit is processed asynchronously on its side.
+                Thread.sleep(FILE_CONNECTION_SETTLE_MS)
+
+                thread(name = "sonora-file-$username", isDaemon = true) {
+                    handleFileConnection(fileSession)
+                }
+            }
         }
 
         if (negotiation !is DownloadRequest.Accepted) {
@@ -481,7 +503,13 @@ class SoulseekSession(
                 DownloadOutcome.Failed("truncated: $written of ${transfer.size} bytes")
             }
         } catch (e: Exception) {
-            onTrace("file connection failed from ${session.username}: ${e.javaClass.simpleName}")
+            // The originating frame matters here: a local `Socket closed` and a peer reset look
+            // identical from the message alone, and they mean very different things.
+            val frame = e.stackTrace.firstOrNull()
+                ?.let { " at ${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+                .orEmpty()
+
+            onTrace("file connection failed from ${session.username}: ${e.javaClass.simpleName}: ${e.message}$frame")
             transfer?.outcome = DownloadOutcome.Failed("${e.javaClass.simpleName}: ${e.message}")
         } finally {
             session.close()
@@ -621,6 +649,12 @@ class SoulseekSession(
          * ourselves. Well under the transfer timeout, because waiting is the failure mode.
          */
         const val DEFAULT_FILE_CONNECTION_FALLBACK_MS = 5_000L
+
+        /**
+         * Pause between opening the file connection and accepting the transfer, so the peer has
+         * registered the inbound connection before it decides where to send `FileTransferInit`.
+         */
+        private const val FILE_CONNECTION_SETTLE_MS = 250L
     }
 }
 
