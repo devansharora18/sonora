@@ -160,11 +160,16 @@ reshare. Recommend splitting reshare out of the initial spike.
 2. ~~`SetWaitPort`, `SetStatus`, `SharedFoldersFiles`~~ — **done.** The server pushed six
    well-formed messages in reply (64, 83, 84, 104, 69, 160), confirming sequential frames
    parse off a single stream without desyncing.
-3. **`FileSearch` → `FileSearchResponse`** — message formats implemented and unit-tested
-   offline, zlib included. **Not yet proven live.** Delivery needs a peer connection, and
-   this network has no inbound reachability (PRD D11), so the outbound fallback is what will
-   matter: the peer's `ConnectToPeer` arrives on our server connection and we dial *out* to
-   it with `PierceFireWall`. Both directions are required, not just the listener.
+3. **`FileSearch` → `FileSearchResponse`** — **done.** Verified against the live network.
+   A single query produced 583 `ConnectToPeer` relays, 49 successful outbound handshakes, and
+   2 responses carrying 16 files. Both attribute sets parsed correctly — lossless
+   (`sampleRate`/`bitDepth`) and lossy (`bitrate`/`VBR`).
+
+   This exercised the **outbound fallback**, not the direct listener path, because this host
+   has no inbound reachability (PRD D11). That makes it the more valuable test: it is the path
+   every device behind CGNAT will take.
+
+Download and reshare come after. Step 3 was the hard unknown; it is now proven.
 
 Download and reshare come after. If step 3 works, the rest is mechanical; if it doesn't,
 nothing later matters.

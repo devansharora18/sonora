@@ -211,8 +211,11 @@ the UI reach into protocol internals — see D10.
    **Done — infeasible.** See D9. Alongside it the Kotlin shell was built and verified:
    Gradle/Compose project, foreground service with the `dataSync` type, persistent
    notification, and loopback reachability.
-2. **Protocol spike** — connect to a Soulseek server, authenticate, and run a search
-   against the real network. The smallest end-to-end slice that proves the protocol work.
+2. ~~**Protocol spike** — connect to a Soulseek server, authenticate, and run a search
+   against the real network.~~
+   **Done.** Login, session messages, search, and search-result parsing all verified against
+   the live network, including the outbound fallback required behind NAT (D11). See
+   `docs/protocol-scope.md`.
 3. **MVP backend integration** — search + download end-to-end.
 4. **MVP player** — library + playback + background/lock-screen controls.
 5. **Polish** — queue-management UX, reshare settings, battery/Doze handling.

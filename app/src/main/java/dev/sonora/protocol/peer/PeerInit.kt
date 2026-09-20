@@ -1,6 +1,7 @@
 package dev.sonora.protocol.peer
 
 import dev.sonora.protocol.MessageReader
+import dev.sonora.protocol.MessageWriter
 
 /**
  * Peer init code 1 (PeerInit). Opens a `P`, `F` or `D` connection and identifies the peer.
@@ -33,3 +34,17 @@ data class PeerHandshake(
     /** Legacy and always 0 in practice; the field is parsed but not relied upon. */
     val token: Long,
 )
+
+/**
+ * Peer init code 0 (PierceFireWall).
+ *
+ * Sent when dialling *out* to a peer that asked the server for an indirect connection,
+ * echoing the token from the [dev.sonora.protocol.server.ConnectToPeer] that triggered it.
+ * This is what makes peer connections work from behind NAT — see PRD D11.
+ */
+object PierceFireWall {
+
+    const val CODE = 0L
+
+    fun request(token: Long): ByteArray = MessageWriter().writeUInt32(token).toByteArray()
+}
