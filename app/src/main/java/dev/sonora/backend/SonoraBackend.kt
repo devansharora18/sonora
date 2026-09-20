@@ -29,13 +29,19 @@ object SonoraBackend {
 
     private const val TAG = "SonoraBackend"
 
-    /** Soulseek has no "search finished" signal; this is how long we call it still running. */
-    private const val SEARCH_WINDOW_MS = 8_000L
+    /**
+     * Soulseek has no "search finished" signal. With hundreds of peers to contact, results keep
+     * arriving for a while, so this is deliberately generous — claiming completion early is what
+     * makes a search look like it found nothing.
+     */
+    private const val SEARCH_WINDOW_MS = 20_000L
 
     /** A broad query can match hundreds of thousands of files; keep the list bounded. */
     private const val MAX_RETAINED_HITS = 500
 
     private val AUDIO_EXTENSIONS = setOf("mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "wma", "aiff", "alac")
+
+    private val WHITESPACE = Regex("\\s+")
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -59,6 +65,9 @@ object SonoraBackend {
         val current = session ?: return
         if (query.isBlank()) return
 
+        val tokens = query.lowercase().split(WHITESPACE).filter { it.isNotEmpty() }
+        if (tokens.isEmpty()) return
+
         _search.value = SearchState(query = query, searching = true)
         Log.d(TAG, "searching: $query")
 
@@ -68,23 +77,47 @@ object SonoraBackend {
                 val audio = response.files.filter { isAudio(it.filename) }
                 if (audio.isEmpty()) return@search
 
+                val incoming = audio.map {
+                    SearchHit(response.username, it.filename, it.size, it.attributes)
+                }
+
                 _search.update { state ->
                     // A response for an earlier query can still arrive; drop it.
                     if (state.query != query) return@update state
 
-                    val hits = state.hits +
-                        audio.map { SearchHit(response.username, it.filename, it.size, it.attributes) }
+                    // Ranked for relevance rather than arrival order: peers answer in whatever
+                    // order they like, so without this the first reply wins regardless of how
+                    // well it matches. Deduped because a peer can send more than one response,
+                    // and duplicate list keys would crash the UI.
+                    val ranked = (state.hits + incoming)
+                        .distinctBy { it.peer to it.filename }
+                        .map { it to relevance(it, tokens) }
+                        .filter { (_, score) -> score > 0 }
+                        .sortedByDescending { (_, score) -> score }
+                        .map { (hit, _) -> hit }
+                        .take(MAX_RETAINED_HITS)
 
-                    state.copy(
-                        hits = hits.take(MAX_RETAINED_HITS),
-                        matched = state.matched + audio.size,
-                    )
+                    state.copy(hits = ranked, matched = ranked.size)
                 }
             }
 
             delay(SEARCH_WINDOW_MS)
             _search.update { if (it.query == query) it.copy(searching = false) else it }
         }
+    }
+
+    /**
+     * How well a hit answers the query.
+     *
+     * Soulseek matches against the whole virtual path, so a file inside an `Ocean Eyes/` folder
+     * legitimately matches while its own name says something else. A name match still means more
+     * than a folder match, hence the weighting.
+     */
+    private fun relevance(hit: SearchHit, tokens: List<String>): Int {
+        val path = hit.filename.lowercase()
+        val name = path.substringAfterLast('\\')
+
+        return tokens.count { name.contains(it) } * 2 + tokens.count { path.contains(it) }
     }
 
     /** Only music is offered in results, matching what the app is for. */

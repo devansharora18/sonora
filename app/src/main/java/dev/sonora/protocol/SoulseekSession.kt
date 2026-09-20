@@ -237,9 +237,9 @@ class SoulseekSession(
         try {
             socket.connect(
                 InetSocketAddress(address.ipAddress(), address.port.toInt()),
-                CONNECT_TIMEOUT_MS,
+                PEER_CONNECT_TIMEOUT_MS,
             )
-            socket.soTimeout = PEER_IDLE_TIMEOUT_MS
+            socket.soTimeout = SEARCH_CONNECTION_IDLE_MS
 
             Framing.PEER_INIT.write(
                 socket.getOutputStream(),
@@ -512,7 +512,7 @@ class SoulseekSession(
         try {
             socket.connect(
                 InetSocketAddress(address.ipAddress(), address.port.toInt()),
-                CONNECT_TIMEOUT_MS,
+                PEER_CONNECT_TIMEOUT_MS,
             )
             socket.soTimeout = PEER_IDLE_TIMEOUT_MS
 
@@ -607,10 +607,14 @@ class SoulseekSession(
         const val MINOR_VERSION = 1
 
         /**
-         * Conservative default: narrow enough to stay well inside a phone's per-process file
-         * descriptor limit, wide enough that results still stream in promptly.
+         * How many peers may be contacted at once.
+         *
+         * Search produces thousands of relays, so this bounds how much of a result set is ever
+         * reached: too small and most peers never get dialled. The reference client allows 512
+         * sockets; it uses non-blocking I/O, which is the better long-term answer for a number
+         * this size, but a thread per connection is workable at this level.
          */
-        const val DEFAULT_MAX_CONCURRENT_PEERS = 50
+        const val DEFAULT_MAX_CONCURRENT_PEERS = 200
 
         private const val FILE_DIAL_THREADS = 4
         private const val FILE_DIAL_QUEUE_CAPACITY = 128
@@ -623,6 +627,19 @@ class SoulseekSession(
         private const val DIAL_QUEUE_CAPACITY = 8192
 
         private const val CONNECT_TIMEOUT_MS = 15_000
+
+        /**
+         * Short, because a peer that does not accept quickly is not worth holding a worker for.
+         * Search produces thousands of relays and most of the work is simply reaching them.
+         */
+        private const val PEER_CONNECT_TIMEOUT_MS = 5_000
+
+        /**
+         * Recycle search connections quickly. Peers send their results promptly, so a long idle
+         * wait just occupies a worker that another peer could be using.
+         */
+        private const val SEARCH_CONNECTION_IDLE_MS = 8_000
+
         private const val PEER_IDLE_TIMEOUT_MS = 30_000
         private const val ADDRESS_TIMEOUT_MS = 10_000L
 

@@ -102,6 +102,16 @@ private fun ResultRow(hit: SearchHit) {
             overflow = TextOverflow.Ellipsis,
         )
 
+        // Soulseek matches on the whole path, so a name that looks unrelated often makes sense
+        // in context. Hiding the folder made correct results look wrong.
+        Text(
+            text = hit.filename.substringBeforeLast('\\', ""),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+
         Text(
             text = "${hit.peer}  \u00b7  ${formatSize(hit.size)}" +
                 quality(hit).let { if (it.isEmpty()) "" else "  \u00b7  $it" },
