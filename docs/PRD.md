@@ -4,8 +4,8 @@
 
 > v0.2 added §15 (Engineering Constraints & Decisions). v0.3 revises §1 and §7: the
 > embedded-.NET backend was proven infeasible (D9) and the project has committed to a
-> Kotlin-native Soulseek implementation. Decision-log entries D1, D4, D5, D7 and D8 still
-> reflect the .NET architecture and are reconciled separately.
+> Kotlin-native Soulseek implementation. §11, §13, §14 and decision-log entries D1, D4, D5,
+> D7 and D8 have been reconciled with that decision.
 
 ---
 
@@ -178,9 +178,13 @@ consequences of using them as references.
 Out of scope for v1. No equivalent to Android's foreground service for a persistent P2P
 daemon, and App Store review has historically rejected Soulseek-style clients.
 
-If pursued later, the likely path is server-backed: slskd runs remotely (user's own
-VPS/NAS, or a hosted backend), and the iOS app is a thin client to that server's API.
-Architecturally different from the on-device Android model — treat it as a separate PRD.
+If pursued later, the likely path is server-backed: a Soulseek backend runs remotely (the
+user's own VPS/NAS, or a hosted service), and the iOS app is a thin client to that
+server's API. Architecturally different from the on-device Android model — treat it as a
+separate PRD.
+
+This is the main reason to keep the backend behind a narrow interface rather than letting
+the UI reach into protocol internals — see D10.
 
 ## 12. Success Metrics (draft)
 
@@ -197,19 +201,23 @@ Architecturally different from the on-device Android model — treat it as a sep
 | 1 | Throttle/disconnect P2P when backgrounded with no active transfers, or stay connected for reshare uptime? | **Narrowed by §15 D3** — Android 15 caps `dataSync` foreground services, so "always connected" is not fully achievable. Remaining choice is how to spend the cap. |
 | 2 | Play Store vs. sideload-first? | **Answered — see §15 D2.** |
 | 3 | Shared-folder model: is "download folder" == "shared folder," or user-curated? | Open |
-| 4 | Fork/vendor slskd's core, or track upstream? | **Reframed by §15 D4** — upstream ships an app, not a library, so this is a fork-maintenance decision. |
+| 4 | In-process Kotlin API or loopback HTTP boundary? | **New — see §15 D10.** |
 | 5 | Single Soulseek account per install, or account switching? | Open |
-| 6 | Who reconciles finished transfers into the library if slskd's state is lost? | **New — see §15 D5.** |
+| 6 | How much of the Soulseek protocol is required for MVP? | **New** — scope before committing to milestone 2 in §14. |
 
 ## 14. Milestones (draft)
 
-1. **Spike** — get slskd's .NET core running as an Android foreground service, confirm
-   the localhost API is reachable from a bare Kotlin test app.
-2. **MVP backend integration** — search + download end-to-end.
-3. **MVP player** — library + playback + background/lock-screen controls.
-4. **Polish** — queue-management UX, reshare settings, battery/Doze handling.
-5. **Alpha distribution** — sideload/internal testing track.
-6. **Distribution decision & compliance review** before wider release.
+1. ~~**Spike** — get slskd's .NET core running as an Android foreground service.~~
+   **Done — infeasible.** See D9. Alongside it the Kotlin shell was built and verified:
+   Gradle/Compose project, foreground service with the `dataSync` type, persistent
+   notification, and loopback reachability.
+2. **Protocol spike** — connect to a Soulseek server, authenticate, and run a search
+   against the real network. The smallest end-to-end slice that proves the protocol work.
+3. **MVP backend integration** — search + download end-to-end.
+4. **MVP player** — library + playback + background/lock-screen controls.
+5. **Polish** — queue-management UX, reshare settings, battery/Doze handling.
+6. **Alpha distribution** — sideload/internal testing track.
+7. **Distribution decision & compliance review** before wider release.
 
 ---
 
@@ -218,23 +226,24 @@ Architecturally different from the on-device Android model — treat it as a sep
 Findings from a technical review of v0.1, verified 2026-09-20. This section is the only
 part of the document that commits to things; §1–14 describe intent.
 
-### D1 — License: AGPL-3.0, not GPL-3.0 · **Decided**
+### D1 — License: AGPL-3.0 · **Decided**
 
-Upstream `slskd` is **AGPL-3.0** (verified against the GitHub API). Sonora previously
-declared GPL-3.0.
+Sonora is licensed **AGPL-3.0**. The original rationale was that embedding slskd (AGPL-3.0)
+forced it; that reasoning is now obsolete (D9), so the choice stands on its own merits:
 
-- AGPLv3 §13 technically permits combining an AGPL work with a GPLv3 work while keeping
-  the GPLv3 portion under GPLv3.
-- But the combined work still carries AGPL's network-use obligations for the slskd
-  portion — and Sonora is itself a network service (it serves files to the Soulseek
-  network), so GPL-3.0 is a poor fit regardless of how slskd is linked.
+- Sonora is itself a network service — it serves files to the Soulseek network — which is
+  precisely the case AGPL's network-use clause exists for.
+- It stays compatible with both slskd (AGPL-3.0) and Soulseek.NET (GPL-3.0), which matter
+  as *references* for the protocol work.
 
-**Decision:** license Sonora under **AGPL-3.0**. `LICENSE` has been replaced accordingly.
-This is the simplest and safest option, not a strictly forced one — if the project
-later drops the embedded-slskd approach, GPL-3.0 becomes viable again.
+**GPL-3.0 is now viable** and would be a legitimate alternative if a weaker copyleft is
+preferred. Not worth churning the LICENSE file over without a reason.
 
-Also unresolved: if `slskd` is to be distributed inside the APK, its source-offer
-obligations apply and must be honored in the distribution channel.
+**Open consequence:** if any protocol code is *ported* (rather than written from the
+protocol specification) from Nicotine+ (GPL-3.0), slskd (AGPL-3.0) or Soulseek.NET
+(GPL-3.0), the result is a derivative work and those terms bind the ported portion. Writing
+from the published spec keeps licensing clean. Decide this per component — it is easy to
+contaminate accidentally.
 
 ### D2 — Distribution: sideload-first · **Decided**
 
@@ -261,29 +270,38 @@ only plausible fit is `dataSync`.
 fully achievable on Android 15+. Reshare uptime is best-effort and bounded. This should
 be stated in the app's UX rather than designed around.
 
-### D4 — slskd is a fork to maintain, not a dependency to consume · **Constraint (accepted)**
+### D4 — No third-party backend; the protocol is implemented in Kotlin · **Decided**
 
-slskd has no reusable "core" package — it is a monolithic ASP.NET Core web app. "Package
-slskd's core minus the web UI" therefore means **maintaining a fork**. Budget for
-upstream divergence and periodic rebases; decide early whether to vendor a pinned
-snapshot or track upstream.
+Superseded. This originally recorded that slskd has no reusable "core", making "package
+slskd's core" a fork-maintenance problem. That is moot: the project has dropped the
+embedded-.NET approach entirely (D9) and implements the Soulseek protocol natively in
+Kotlin.
 
-Related technical unknown for the spike: ASP.NET Core (Kestrel, SignalR, and slskd's DI
-graph) is reflection- and codegen-heavy, while .NET for Android Release builds
-trim/AOT. **Whether this survives trimming is the spike's real question**, not whether
-the runtime starts.
+Reference implementations to work from — inputs, not dependencies:
 
-### D5 — Library reconciliation is undefined · **Open — needs design**
+| Project | Language | License |
+| ------- | -------- | ------- |
+| Nicotine+ | Python | GPL-3.0 |
+| slskd | C# (.NET) | AGPL-3.0 |
+| Soulseek.NET | C# (.NET) | GPL-3.0 |
 
-slskd owns transfer state; Room owns library metadata. If slskd's state is lost or its
-config is recreated, queued/completed transfers disappear while Room still claims the
-files exist — producing ghost library entries, or downloads that never reach the
-library.
+The protocol is publicly documented (Nicotine+ publishes an `SLSKPROTOCOL` reference). See
+D1 for the licensing consequences of porting rather than reimplementing.
 
-Pick one and document it:
+### D5 — Library reconciliation · **Simplified — mostly resolved by D9**
 
-- On-disk file presence is the source of truth for the library, or
-- A stable transfer ID shared between slskd state and Room records.
+Originally this flagged a cross-system problem: slskd owned transfer state while Room owned
+library metadata, so losing slskd's state produced ghost library entries or downloads that
+never reached the library.
+
+With a Kotlin backend there is **one state store**, so that class of divergence disappears.
+What remains is ordinary local design: transfers and library records live in the same
+database, and a completed transfer creates its library row in the same transaction.
+
+One residual case still needs a rule: a file deleted outside the app (by the user, or by OS
+storage cleanup) while its library row survives. Decide whether on-disk file presence is
+authoritative and reconciled on scan, or the database is authoritative and missing files
+are marked unavailable. Small, but it should be explicit.
 
 ### D6 — Onboarding is "enter credentials," not "create credentials" · **Constraint**
 
@@ -291,13 +309,17 @@ Soulseek accounts are created out-of-band; there is no self-registration API pat
 "create/enter Soulseek credentials" is really "enter existing credentials," so the
 onboarding flow needs a link out to account creation.
 
-### D7 — APK size is a first-class design input · **Constraint**
+### D7 — APK size · **Largely resolved by D9**
 
-The .NET runtime baseline is tens of MB before slskd, its dependencies, or any assets.
-Combined with D2 (sideload-first), this is a UX/budget concern rather than a blocker —
-but it should be measured during the spike, not after.
+This was a real concern while a .NET runtime was to be embedded — a measured baseline of
+tens of MB before any application code. Dropping .NET removes it.
 
-### D8 — Cleartext to loopback is blocked by default · **Constraint (mitigated)**
+Reference point from the spike: a hello-world .NET Android app with AOT produced a **7.2 MB
+APK**, containing a 3.1 MB Mono runtime and a 1.4 MB JNI bridge. Sonora's current Compose
+shell is **11.4 MB** with no protocol code and no Media3/Room yet, so size is worth watching
+but is no longer architecture-defining.
+
+### D8 — Cleartext to loopback is blocked by default · **Conditional on D10**
 
 Android blocks cleartext HTTP from API 28 onward, and **`127.0.0.1` is not exempt**.
 Verified on API 35 at `targetSdk 35`:
@@ -306,15 +328,17 @@ Verified on API 35 at `targetSdk 35`:
 IOException: Cleartext HTTP traffic to 127.0.0.1 not permitted
 ```
 
-This breaks the PRD's core contract (§7: the UI talks to the slskd API over `localhost`
-HTTP) unless the app explicitly opts in. Mitigated with a narrowly scoped
-`res/xml/network_security_config.xml` permitting cleartext for `127.0.0.1` and
-`localhost` only — everything else stays cleartext-blocked. A blanket
+This mattered because §7's original contract sent the UI to the backend over `localhost`
+HTTP. **If D10 settles on an in-process Kotlin interface, this constraint disappears
+entirely** — there is no HTTP hop to block.
+
+If a loopback HTTP boundary is kept (for example to preserve the §11 server-backed path),
+the mitigation is already in place: a narrowly scoped `res/xml/network_security_config.xml`
+permitting cleartext for `127.0.0.1` and `localhost` only. A blanket
 `android:usesCleartextTraffic="true"` was deliberately avoided.
 
-If Kestrel is ever put behind HTTPS on loopback this exemption becomes unnecessary, but a
-local self-signed certificate introduces its own trust-anchor problem, so plain HTTP over
-loopback remains the simpler choice.
+`SonoraService` currently still serves a fixed response on `127.0.0.1:5030`. That was a
+probe for this exact constraint and is expected to be deleted once D10 is settled.
 
 ### D9 — .NET cannot be hosted inside a Kotlin app · **Decided — option B**
 
