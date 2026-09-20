@@ -10,6 +10,8 @@ import dev.sonora.protocol.peer.QueueUpload
 import dev.sonora.protocol.peer.SearchResponse
 import dev.sonora.protocol.peer.TransferRequest
 import dev.sonora.protocol.peer.TransferResponse
+import dev.sonora.protocol.peer.UploadDenied
+import dev.sonora.protocol.peer.UploadFailed
 import dev.sonora.protocol.server.ConnectToPeer
 import dev.sonora.protocol.server.FileSearch
 import dev.sonora.protocol.server.GetPeerAddress
@@ -301,7 +303,7 @@ class SoulseekSession(
      * peer to open a file connection, which arrives later through the normal peer paths.
      */
     fun requestDownload(username: String, filename: String): DownloadRequest =
-        negotiateDownload(username, filename, expectedSize = null) { }
+        negotiateDownload(username, filename, expectedSize = null) { _, _ -> }
 
     /**
      * Downloads a file to [destination]. Blocking: returns once the transfer completes or fails.
@@ -318,9 +320,10 @@ class SoulseekSession(
         val transfer = PendingTransfer(destination, size)
         var token: Long? = null
 
-        val negotiation = negotiateDownload(username, filename, expectedSize = size) { accepted ->
+        val negotiation = negotiateDownload(username, filename, expectedSize = size) { peer, accepted ->
             token = accepted
             pendingTransfers[accepted] = transfer
+            watchNegotiationConnection(peer, transfer)
         }
 
         if (negotiation !is DownloadRequest.Accepted) {
@@ -355,7 +358,7 @@ class SoulseekSession(
         username: String,
         filename: String,
         expectedSize: Long?,
-        onAccepted: (token: Long) -> Unit,
+        onAccepted: (peer: PeerSession, token: Long) -> Unit,
     ): DownloadRequest {
         val peer = connectToUser(username) ?: return DownloadRequest.Unreachable
 
@@ -373,7 +376,7 @@ class SoulseekSession(
         peer: PeerSession,
         filename: String,
         expectedSize: Long?,
-        onAccepted: (token: Long) -> Unit,
+        onAccepted: (peer: PeerSession, token: Long) -> Unit,
     ): DownloadRequest {
         var outcome: DownloadRequest = DownloadRequest.Unreachable
 
@@ -390,7 +393,7 @@ class SoulseekSession(
 
             // Registered before we accept: the uploader may open the file connection the instant
             // it receives our acceptance, so the token has to be known by then.
-            onAccepted(request.token)
+            onAccepted(peer, request.token)
 
             // Echo the size we believe in — the caller's from the search result, since the peer
             // reports 0 for files over 2 GB.
@@ -404,6 +407,42 @@ class SoulseekSession(
         }
 
         return outcome
+    }
+
+    /**
+     * Keeps reading the connection the file was requested on.
+     *
+     * We used to stop reading the instant we accepted, which made anything the peer said next —
+     * a refusal, a queue notice — completely invisible. Peers also revoke queued files here.
+     */
+    private fun watchNegotiationConnection(peer: PeerSession, transfer: PendingTransfer) {
+        thread(name = "sonora-negotiation-${peer.username}", isDaemon = true) {
+            try {
+                while (true) {
+                    val message = peer.read()
+                    onTrace("post-accept ${peer.username} message ${message.code}")
+
+                    if (message.code == UploadDenied.CODE) {
+                        val denial = UploadDenied.parse(message.body)
+                        transfer.outcome = DownloadOutcome.Failed("peer refused: ${denial.reason}")
+                        transfer.completion.countDown()
+                        return@thread
+                    }
+
+                    if (message.code == UploadFailed.CODE) {
+                        // The peer tried and gave up — most often because it could not reach us,
+                        // since a closed listening port leaves it nothing to connect to.
+                        val filename = UploadFailed.parse(message.body)
+                        transfer.outcome =
+                            DownloadOutcome.Failed("peer gave up on the upload ($filename)")
+                        transfer.completion.countDown()
+                        return@thread
+                    }
+                }
+            } catch (_: Exception) {
+                // Connection ended. The file connection, if any, carries on independently.
+            }
+        }
     }
 
     /** Receives a file over an established `F` connection and completes the pending transfer. */

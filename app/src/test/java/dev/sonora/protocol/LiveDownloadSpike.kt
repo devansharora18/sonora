@@ -41,6 +41,9 @@ class LiveDownloadSpike {
             username = username,
             password = password,
             transferTimeoutMillis = ATTEMPT_TIMEOUT_MS,
+            // Dial straight away rather than waiting: the peer gives up on its own within
+            // seconds, so a late fallback arrives after the transfer is already dead.
+            fileConnectionFallbackMillis = 250,
             onTrace = { println("[spike] $it") },
         ).use { session ->
             val login = session.connect()
