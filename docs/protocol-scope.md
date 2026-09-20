@@ -161,8 +161,10 @@ reshare. Recommend splitting reshare out of the initial spike.
    well-formed messages in reply (64, 83, 84, 104, 69, 160), confirming sequential frames
    parse off a single stream without desyncing.
 3. **`FileSearch` → `FileSearchResponse`** — message formats implemented and unit-tested
-   offline, zlib included. **Not yet proven live:** peers connect *to us* to deliver
-   results, so this needs a listening peer socket before it can be tested end to end.
+   offline, zlib included. **Not yet proven live.** Delivery needs a peer connection, and
+   this network has no inbound reachability (PRD D11), so the outbound fallback is what will
+   matter: the peer's `ConnectToPeer` arrives on our server connection and we dial *out* to
+   it with `PierceFireWall`. Both directions are required, not just the listener.
 
 Download and reshare come after. If step 3 works, the rest is mechanical; if it doesn't,
 nothing later matters.

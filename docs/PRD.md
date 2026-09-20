@@ -422,3 +422,30 @@ localhost HTTP contract existed only because the backend was a different runtime
 
 Recommendation: start in-process behind a narrow interface. The seam can be introduced later
 if the server-backed iOS path in §11 becomes real; it does not need designing now.
+
+### D11 — Peer connections must work behind NAT · **Constraint (implementation requirement)**
+
+The pre-flight for spike step 3 measured this: port 2234 is **not reachable from the
+internet**. Four independent external nodes (Bulgaria, Germany, Italy, Portugal) all timed
+out while the port was confirmed listening locally (`ss` showed `0.0.0.0:2234` LISTEN), and
+the host sits behind NAT (`172.16.206.248/21`). Soulseek's own port test agreed.
+
+An earlier assessment in this review claimed that would mean zero search results. **That was
+overstated.** Re-reading the peer connection order, the protocol has an outbound fallback:
+
+1. The peer holding the match sends `ConnectToPeer` to the **server** (S 18).
+2. That arrives over our existing server connection — which works fine behind NAT, because
+   we dialled it outbound.
+3. We then dial *out* to the peer and send `PierceFireWall` (peer init 0).
+
+So search can work without an inbound-reachable port. But the fallback is **not optional**:
+
+- Mobile carriers use CGNAT, so an Android device on mobile data will essentially never have
+  an inbound-reachable port.
+- The peer layer therefore has to handle **both** directions: accept inbound `PeerInit`, and
+  handle `ConnectToPeer` arriving on the server connection by dialling out.
+
+**Consequence for reshare:** being reachable still matters for peers downloading *from* us.
+Without port forwarding or a relay — neither of which a casual mobile user will have —
+reshare reachability is degraded. This sharpens D3's "reshare uptime is best-effort"
+conclusion, and is a further reason not to lean on reshare as a headline feature.
