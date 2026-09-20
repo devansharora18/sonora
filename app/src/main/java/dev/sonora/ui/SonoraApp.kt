@@ -7,27 +7,29 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import dev.sonora.service.SonoraService
-import java.net.HttpURLConnection
-import java.net.URL
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import dev.sonora.backend.BackendState
+import dev.sonora.backend.SonoraBackend
 
 /**
  * App root. Navigation and the feature graph hang off here.
@@ -35,12 +37,10 @@ import kotlinx.coroutines.withContext
 @Composable
 fun SonoraApp() {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val state by SonoraBackend.state.collectAsState()
 
-    // Reflects the last action taken, not authoritative service state. This gets replaced
-    // once the local API can report real backend status.
-    var backendState by remember { mutableStateOf("Stopped") }
-    var pingResult by remember { mutableStateOf("-") }
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
 
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -60,49 +60,83 @@ fun SonoraApp() {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(text = "Sonora", style = MaterialTheme.typography.headlineMedium)
-        Text(text = "Backend: $backendState", style = MaterialTheme.typography.bodyMedium)
 
-        Button(
-            onClick = {
-                SonoraService.start(context)
-                backendState = "Running"
-            },
-        ) {
-            Text("Start")
+        when (val current = state) {
+            BackendState.Idle -> ConnectForm(
+                username = username,
+                password = password,
+                onUsername = { username = it },
+                onPassword = { password = it },
+                onConnect = {
+                    SonoraBackend.connect(context, username.trim(), password)
+                },
+            )
+
+            BackendState.Connecting -> {
+                Text("Connecting\u2026", style = MaterialTheme.typography.bodyMedium)
+                CircularProgressIndicator()
+            }
+
+            is BackendState.Connected -> {
+                Text("Connected", style = MaterialTheme.typography.titleMedium)
+                if (current.greeting.isNotBlank()) {
+                    Text(current.greeting, style = MaterialTheme.typography.bodyMedium)
+                }
+                Button(onClick = { SonoraBackend.disconnect(context) }) {
+                    Text("Disconnect")
+                }
+            }
+
+            is BackendState.Failed -> {
+                Text(
+                    text = "Could not connect",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Text(current.reason, style = MaterialTheme.typography.bodyMedium)
+                Button(onClick = { SonoraBackend.disconnect(context) }) {
+                    Text("Back")
+                }
+            }
         }
-
-        Button(
-            onClick = {
-                SonoraService.stop(context)
-                backendState = "Stopped"
-            },
-        ) {
-            Text("Stop")
-        }
-
-        Button(
-            onClick = {
-                scope.launch { pingResult = pingLocalApi() }
-            },
-        ) {
-            Text("Ping backend")
-        }
-
-        Text(text = "Local API: $pingResult", style = MaterialTheme.typography.bodySmall)
     }
 }
 
-private suspend fun pingLocalApi(): String = withContext(Dispatchers.IO) {
-    runCatching {
-        val connection =
-            URL("http://127.0.0.1:${SonoraService.PORT}/").openConnection() as HttpURLConnection
-        connection.connectTimeout = 2_000
-        connection.readTimeout = 2_000
-        try {
-            val body = connection.inputStream.bufferedReader().use { it.readText() }
-            "${connection.responseCode} $body"
-        } finally {
-            connection.disconnect()
-        }
-    }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
+@Composable
+private fun ConnectForm(
+    username: String,
+    password: String,
+    onUsername: (String) -> Unit,
+    onPassword: (String) -> Unit,
+    onConnect: () -> Unit,
+) {
+    OutlinedTextField(
+        value = username,
+        onValueChange = onUsername,
+        label = { Text("Soulseek username") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    OutlinedTextField(
+        value = password,
+        onValueChange = onPassword,
+        label = { Text("Password") },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    Button(
+        onClick = onConnect,
+        enabled = username.isNotBlank() && password.isNotBlank(),
+    ) {
+        Text("Connect")
+    }
+
+    Text(
+        text = "An unknown username is registered on first sign-in.",
+        style = MaterialTheme.typography.bodySmall,
+    )
 }

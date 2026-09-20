@@ -338,26 +338,22 @@ APK**, containing a 3.1 MB Mono runtime and a 1.4 MB JNI bridge. Sonora's curren
 shell is **11.4 MB** with no protocol code and no Media3/Room yet, so size is worth watching
 but is no longer architecture-defining.
 
-### D8 — Cleartext to loopback is blocked by default · **Conditional on D10**
+### D8 — Cleartext to loopback is blocked by default · **Moot under D10**
 
-Android blocks cleartext HTTP from API 28 onward, and **`127.0.0.1` is not exempt**.
-Verified on API 35 at `targetSdk 35`:
+Android blocks cleartext HTTP from API 28 onward, and **`127.0.0.1` is not exempt**. Measured on
+API 35 at `targetSdk 35`:
 
 ```
 IOException: Cleartext HTTP traffic to 127.0.0.1 not permitted
 ```
 
-This mattered because §7's original contract sent the UI to the backend over `localhost`
-HTTP. **If D10 settles on an in-process Kotlin interface, this constraint disappears
-entirely** — there is no HTTP hop to block.
+This was found while the design had the UI reaching the backend over `localhost` HTTP. With D10
+settled as **in-process**, there is no HTTP hop, so the constraint no longer applies and the
+`network_security_config.xml` exemption has been removed.
 
-If a loopback HTTP boundary is kept (for example to preserve the §11 server-backed path),
-the mitigation is already in place: a narrowly scoped `res/xml/network_security_config.xml`
-permitting cleartext for `127.0.0.1` and `localhost` only. A blanket
-`android:usesCleartextTraffic="true"` was deliberately avoided.
-
-`SonoraService` currently still serves a fixed response on `127.0.0.1:5030`. That was a
-probe for this exact constraint and is expected to be deleted once D10 is settled.
+Worth keeping the finding on record: had the loopback boundary been kept, this would have been a
+silent breakage of the core contract, and the fix is a narrowly scoped exemption rather than a
+blanket `usesCleartextTraffic`.
 
 ### D9 — .NET cannot be hosted inside a Kotlin app · **Decided — option B**
 
@@ -412,19 +408,23 @@ build system, produce a far smaller APK, and leave §7's Kotlin-side design inta
 is owning a protocol implementation; the reference implementations above are inputs to that
 work, not dependencies.
 
-### D10 — Internal API boundary: in-process Kotlin vs. loopback HTTP · **Open**
+### D10 — Internal API boundary: in-process Kotlin · **Decided**
 
-With a Kotlin-native backend the UI and backend share a process and a language. The original
-localhost HTTP contract existed only because the backend was a different runtime.
+The UI and backend share a process and a language, so the original localhost HTTP contract — which
+existed only because the backend was a different runtime — is gone.
 
-- **In-process Kotlin interface** — simpler: no serialization, no port management, no
-  network policy. Makes D8 moot. Loses the ability to point the UI at a remote backend.
-- **Loopback HTTP/WebSocket** — preserves §11's future iOS path (server-backed, thin client)
-  and keeps a hard seam for testing. Costs a serialization layer, and keeps D8's cleartext
-  exemption relevant.
+- **In-process Kotlin interface** — chosen. No serialization, no port management, no network
+  policy.
+- ~~Loopback HTTP/WebSocket~~ — would preserve §11's future iOS path and keep a hard seam, at the
+  cost of a serialization layer and a local HTTP server.
 
-Recommendation: start in-process behind a narrow interface. The seam can be introduced later
-if the server-backed iOS path in §11 becomes real; it does not need designing now.
+**Decision (2026-09-20): in-process.** `SonoraBackend` holds the `SoulseekSession` directly and
+publishes state as a `StateFlow`; the foreground service keeps the process alive rather than
+brokering calls. Verified end to end: the UI connects to the live network.
+
+The seam is not lost, only deferred. If §11's server-backed path becomes real, a remote
+implementation behind the same state interface is the natural extension — and a singleton is not
+the right shape at that point, so it should be revisited then rather than pre-built now.
 
 ### D11 — Peer connections must work behind NAT · **Constraint (implementation requirement)**
 
