@@ -294,3 +294,22 @@ onboarding flow needs a link out to account creation.
 The .NET runtime baseline is tens of MB before slskd, its dependencies, or any assets.
 Combined with D2 (sideload-first), this is a UX/budget concern rather than a blocker —
 but it should be measured during the spike, not after.
+
+### D8 — Cleartext to loopback is blocked by default · **Constraint (mitigated)**
+
+Android blocks cleartext HTTP from API 28 onward, and **`127.0.0.1` is not exempt**.
+Verified on API 35 at `targetSdk 35`:
+
+```
+IOException: Cleartext HTTP traffic to 127.0.0.1 not permitted
+```
+
+This breaks the PRD's core contract (§7: the UI talks to the slskd API over `localhost`
+HTTP) unless the app explicitly opts in. Mitigated with a narrowly scoped
+`res/xml/network_security_config.xml` permitting cleartext for `127.0.0.1` and
+`localhost` only — everything else stays cleartext-blocked. A blanket
+`android:usesCleartextTraffic="true"` was deliberately avoided.
+
+If Kestrel is ever put behind HTTPS on loopback this exemption becomes unnecessary, but a
+local self-signed certificate introduces its own trust-anchor problem, so plain HTTP over
+loopback remains the simpler choice.

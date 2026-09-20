@@ -16,12 +16,18 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import dev.sonora.service.SonoraService
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * App root. Navigation and the feature graph hang off here.
@@ -29,10 +35,12 @@ import dev.sonora.service.SonoraService
 @Composable
 fun SonoraApp() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     // Reflects the last action taken, not authoritative service state. This gets replaced
     // once the local API can report real backend status.
     var backendState by remember { mutableStateOf("Stopped") }
+    var pingResult by remember { mutableStateOf("-") }
 
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -71,5 +79,30 @@ fun SonoraApp() {
         ) {
             Text("Stop")
         }
+
+        Button(
+            onClick = {
+                scope.launch { pingResult = pingLocalApi() }
+            },
+        ) {
+            Text("Ping backend")
+        }
+
+        Text(text = "Local API: $pingResult", style = MaterialTheme.typography.bodySmall)
     }
+}
+
+private suspend fun pingLocalApi(): String = withContext(Dispatchers.IO) {
+    runCatching {
+        val connection =
+            URL("http://127.0.0.1:${SonoraService.PORT}/").openConnection() as HttpURLConnection
+        connection.connectTimeout = 2_000
+        connection.readTimeout = 2_000
+        try {
+            val body = connection.inputStream.bufferedReader().use { it.readText() }
+            "${connection.responseCode} $body"
+        } finally {
+            connection.disconnect()
+        }
+    }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
 }
