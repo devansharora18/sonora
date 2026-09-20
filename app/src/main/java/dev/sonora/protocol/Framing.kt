@@ -1,5 +1,9 @@
 package dev.sonora.protocol
 
+import java.io.EOFException
+import java.io.InputStream
+import java.io.OutputStream
+
 /**
  * How messages are delimited on each Soulseek connection type.
  *
@@ -51,6 +55,52 @@ enum class Framing(val codeSize: Int, val lengthPrefixed: Boolean) {
         val code = if (codeSize == 1) reader.readByte().toLong() else reader.readUInt32()
         return Message(code, reader.readRemaining())
     }
+
+    fun write(output: OutputStream, code: Long, body: ByteArray) {
+        output.write(encode(code, body))
+        output.flush()
+    }
+
+    /** Reads one framed message, blocking until it arrives. */
+    fun read(input: InputStream): Message {
+        require(lengthPrefixed) { "$name messages are not framed" }
+
+        val declaredLength = MessageReader(input.readExactly(4)).readUInt32()
+        require(declaredLength <= MAX_MESSAGE_LENGTH) {
+            "message length $declaredLength exceeds the $MAX_MESSAGE_LENGTH byte limit"
+        }
+
+        val payload = input.readExactly(declaredLength.toInt())
+        val reader = MessageReader(payload)
+        val code = if (codeSize == 1) reader.readByte().toLong() else reader.readUInt32()
+        return Message(code, reader.readRemaining())
+    }
+
+    companion object {
+        /**
+         * Safety bound on a single message, so a corrupt or hostile length prefix cannot
+         * force a huge allocation. Comfortably fits a SharedFileListResponse from a very
+         * large library; raise it if a legitimate message is ever rejected.
+         */
+        const val MAX_MESSAGE_LENGTH = 32L * 1024 * 1024
+    }
+}
+
+/**
+ * Reads exactly [count] bytes.
+ *
+ * [InputStream.read] is allowed to return fewer bytes than requested, so a single call is
+ * not enough. This is where naive protocol parsers silently desync from the wire.
+ */
+private fun InputStream.readExactly(count: Int): ByteArray {
+    val bytes = ByteArray(count)
+    var offset = 0
+    while (offset < count) {
+        val read = read(bytes, offset, count - offset)
+        if (read < 0) throw EOFException("stream ended after $offset of $count bytes")
+        offset += read
+    }
+    return bytes
 }
 
 /** A decoded message: its numeric code and the raw body following it. */
