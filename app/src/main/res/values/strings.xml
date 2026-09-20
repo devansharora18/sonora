@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Sonora</string>
+    <string name="notification_channel_name">Sonora backend</string>
+    <string name="notification_connecting">Connecting to the Soulseek network</string>
 </resources>
