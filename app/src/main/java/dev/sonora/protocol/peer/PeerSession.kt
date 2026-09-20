@@ -16,6 +16,11 @@ class PeerSession(
     /** Blocks until the peer sends its next message. */
     fun read(): Message = Framing.PEER.read(socket.getInputStream())
 
+    /** Sends a peer message. */
+    fun send(code: Long, body: ByteArray) {
+        Framing.PEER.write(socket.getOutputStream(), code, body)
+    }
+
     /**
      * How long [read] blocks before throwing `SocketTimeoutException`; 0 waits forever.
      *

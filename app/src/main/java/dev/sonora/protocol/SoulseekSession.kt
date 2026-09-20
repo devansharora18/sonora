@@ -5,7 +5,10 @@ import dev.sonora.protocol.peer.PeerInit
 import dev.sonora.protocol.peer.PeerListener
 import dev.sonora.protocol.peer.PeerSession
 import dev.sonora.protocol.peer.PierceFireWall
+import dev.sonora.protocol.peer.QueueUpload
 import dev.sonora.protocol.peer.SearchResponse
+import dev.sonora.protocol.peer.TransferRequest
+import dev.sonora.protocol.peer.TransferResponse
 import dev.sonora.protocol.server.ConnectToPeer
 import dev.sonora.protocol.server.FileSearch
 import dev.sonora.protocol.server.GetPeerAddress
@@ -245,6 +248,48 @@ class SoulseekSession(
         return dialDirect(username, address)
     }
 
+    /**
+     * Negotiates a download from a user: connects to them, asks for the file, and accepts the
+     * transfer they offer.
+     *
+     * The transfer itself is not handled here — accepting a [TransferRequest] only tells the
+     * peer to open a file connection, which arrives later through the normal peer paths.
+     */
+    fun requestDownload(username: String, filename: String): DownloadRequest {
+        val peer = connectToUser(username) ?: return DownloadRequest.Unreachable
+
+        return try {
+            peer.send(QueueUpload.CODE, QueueUpload.request(filename))
+            awaitOffer(peer, filename)
+        } catch (_: Exception) {
+            // Peer hung up, went quiet, or answered with something unparseable.
+            DownloadRequest.Unreachable
+        }
+    }
+
+    /** Reads until the peer offers [filename], then accepts it. */
+    private fun awaitOffer(peer: PeerSession, filename: String): DownloadRequest {
+        var outcome: DownloadRequest = DownloadRequest.Unreachable
+
+        while (true) {
+            val message = peer.read()
+
+            // Anything other than the offer we are waiting for: keep reading until the peer
+            // offers the file or goes quiet.
+            if (message.code != TransferRequest.CODE) continue
+
+            val request = TransferRequest.parse(message.body)
+            if (request.direction != TransferRequest.DIRECTION_UPLOAD) continue
+            if (request.filename != filename) continue
+
+            peer.send(TransferResponse.CODE, TransferResponse.accepted(request.token))
+            outcome = DownloadRequest.Accepted(request.token, request.filename, request.size)
+            break
+        }
+
+        return outcome
+    }
+
     private fun dialDirect(username: String, address: UserAddress): PeerSession? {
         val socket = Socket()
         outboundPeers += socket
@@ -355,4 +400,27 @@ class SoulseekSession(
         private const val PEER_IDLE_TIMEOUT_MS = 30_000
         private const val ADDRESS_TIMEOUT_MS = 10_000L
     }
+}
+
+/** The outcome of asking a peer for a file. */
+sealed interface DownloadRequest {
+
+    /** The peer accepted and will open a file connection for [filename]. */
+    data class Accepted(
+        val token: Long,
+        val filename: String,
+        /**
+         * As reported by the peer. Unreliable for files over 2 GB, where SoulseekQt sends 0 and
+         * clients fall back to the size from the original search result.
+         */
+        val size: Long?,
+    ) : DownloadRequest
+
+    /**
+     * The peer could not be reached or never answered.
+     *
+     * Note a peer can also actively refuse (peer code 50, `QueueFailed`), which is not handled
+     * yet — that currently shows up here as a timeout instead.
+     */
+    data object Unreachable : DownloadRequest
 }

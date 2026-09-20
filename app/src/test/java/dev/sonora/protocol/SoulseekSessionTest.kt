@@ -1,8 +1,11 @@
 package dev.sonora.protocol
 
 import dev.sonora.protocol.peer.PeerInit
+import dev.sonora.protocol.peer.PeerSession
 import dev.sonora.protocol.peer.SearchResponse
 import dev.sonora.protocol.peer.SearchWire
+import dev.sonora.protocol.peer.TransferRequest
+import dev.sonora.protocol.peer.TransferResponse
 import dev.sonora.protocol.server.FileSearch
 import dev.sonora.protocol.server.LoginResponse
 import dev.sonora.protocol.server.SetStatus
@@ -179,6 +182,64 @@ class SoulseekSessionTest {
                         peer.awaitConnectionType(PeerInit.TYPE_PEER),
                     )
                     assertEquals(setOf(PeerInit.TYPE_PEER), peer.directConnectionTypes)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `requestDownload queues the file and accepts the transfer offered`() {
+        val queued = LinkedBlockingQueue<String>()
+        val response = LinkedBlockingQueue<Triple<Long, Long, Boolean>>()
+
+        FakePeer(
+            conversation = { peer ->
+                val upload = peer.read()
+                queued.put(MessageReader(upload.body).readString())
+
+                peer.send(
+                    TransferRequest.CODE,
+                    MessageWriter()
+                        .writeUInt32(TransferRequest.DIRECTION_UPLOAD)
+                        .writeUInt32(77)
+                        .writeString("Music\\Artist\\track.flac")
+                        .writeUInt64(1_234_567)
+                        .toByteArray(),
+                )
+
+                val reply = peer.read()
+                val reader = MessageReader(reply.body)
+                response.put(Triple(reply.code, reader.readUInt32(), reader.readBool()))
+            },
+        ).use { peer ->
+            FakeSoulseekServer().use { server ->
+                server.peerPort = peer.port
+
+                session(server).use { session ->
+                    session.connect()
+
+                    val result = session.requestDownload("some_peer", "Music\\Artist\\track.flac")
+
+                    // What we asked for.
+                    assertEquals(
+                        "Music\\Artist\\track.flac",
+                        queued.poll(5, TimeUnit.SECONDS),
+                    )
+
+                    // The outcome we reported to the caller.
+                    val accepted = checkNotNull(result as? DownloadRequest.Accepted) {
+                        "expected an accepted download, got $result"
+                    }
+                    assertEquals(77L, accepted.token)
+                    assertEquals(1_234_567L, accepted.size)
+
+                    // And what we actually sent back: the peer's token, accepted.
+                    val (code, token, allowed) = checkNotNull(response.poll(5, TimeUnit.SECONDS)) {
+                        "peer never received a transfer response"
+                    }
+                    assertEquals(TransferResponse.CODE, code)
+                    assertEquals(77L, token)
+                    assertTrue("the transfer should have been accepted", allowed)
                 }
             }
         }

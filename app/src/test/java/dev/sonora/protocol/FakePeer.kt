@@ -2,6 +2,7 @@ package dev.sonora.protocol
 
 import dev.sonora.protocol.peer.FileSearchResponse
 import dev.sonora.protocol.peer.PeerInit
+import dev.sonora.protocol.peer.PeerSession
 import dev.sonora.protocol.peer.PierceFireWall
 import java.io.Closeable
 import java.net.InetAddress
@@ -23,6 +24,11 @@ internal class FakePeer(
     /** Peer message body to answer with, given the handshake token; null to send nothing. */
     private val reply: (token: Long) -> ByteArray? = { null },
     private val holdOpen: Boolean = false,
+    /**
+     * Post-handshake peer exchange, for tests that need a conversation. Runs instead of nothing;
+     * [reply] and [holdOpen] still apply.
+     */
+    private val conversation: ((PeerSession) -> Unit)? = null,
 ) : Closeable {
 
     private val server = ServerSocket(0, BACKLOG, InetAddress.getLoopbackAddress())
@@ -71,6 +77,9 @@ internal class FakePeer(
         try {
             val handshake = Framing.PEER_INIT.read(socket.getInputStream())
 
+            var username = ""
+            var connectionType = ""
+
             val token: Long = when (handshake.code) {
                 // Indirect: the peer dialled us back after we sent PierceFireWall.
                 PierceFireWall.CODE -> MessageReader(handshake.body).readUInt32()
@@ -78,8 +87,9 @@ internal class FakePeer(
                 // Direct: the session dialled us.
                 PeerInit.CODE -> {
                     val reader = MessageReader(handshake.body)
-                    reader.readString() // username
-                    connectionTypes += reader.readString()
+                    username = reader.readString()
+                    connectionType = reader.readString()
+                    connectionTypes += connectionType
                     reader.readUInt32()
                 }
 
@@ -91,6 +101,8 @@ internal class FakePeer(
             reply(token)?.let { body ->
                 Framing.PEER.write(socket.getOutputStream(), FileSearchResponse.CODE, body)
             }
+
+            conversation?.invoke(PeerSession(username, connectionType, socket))
 
             if (holdOpen) {
                 release.await()
