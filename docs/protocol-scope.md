@@ -160,7 +160,7 @@ reshare. Recommend splitting reshare out of the initial spike.
 2. ~~`SetWaitPort`, `SetStatus`, `SharedFoldersFiles`~~ — **done.** The server pushed six
    well-formed messages in reply (64, 83, 84, 104, 69, 160), confirming sequential frames
    parse off a single stream without desyncing.
-3. **`FileSearch` → `FileSearchResponse`** — **done.** Verified against the live network.
+3. ~~**`FileSearch` → `FileSearchResponse`**~~ — **done.** Verified against the live network.
    A single query produced 583 `ConnectToPeer` relays, 49 successful outbound handshakes, and
    2 responses carrying 16 files. Both attribute sets parsed correctly — lossless
    (`sampleRate`/`bitDepth`) and lossy (`bitrate`/`VBR`).
@@ -169,7 +169,12 @@ reshare. Recommend splitting reshare out of the initial spike.
    has no inbound reachability (PRD D11). That makes it the more valuable test: it is the path
    every device behind CGNAT will take.
 
-Download and reshare come after. Step 3 was the hard unknown; it is now proven.
+4. ~~**Download negotiation + file transfer**~~ — **done.** Verified offline and against the
+   live network. A 4,258,304-byte file completed over the NATed host with UPnP disabled and no
+   port forwarding.
 
-Download and reshare come after. If step 3 works, the rest is mechanical; if it doesn't,
-nothing later matters.
+   The live blocker was not NAT or file framing: the shared dial queue was saturated by search
+   `P` relays, starving `F` relays. Sonora now gives file relays their own bounded pool.
+
+Reshare remains. It requires distributed search participation, shared-file-list responses, and
+upload handling; it is the next substantial protocol milestone.
