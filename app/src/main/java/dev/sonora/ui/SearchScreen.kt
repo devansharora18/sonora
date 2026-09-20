@@ -1,5 +1,6 @@
 package dev.sonora.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -21,14 +23,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.sonora.backend.DownloadState
 import dev.sonora.backend.SearchHit
 import dev.sonora.backend.SonoraBackend
 
 @Composable
 fun SearchScreen() {
+    val context = LocalContext.current
     val state by SonoraBackend.search.collectAsState()
+    val download by SonoraBackend.download.collectAsState()
     var query by remember { mutableStateOf("") }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -79,9 +85,11 @@ fun SearchScreen() {
             )
         }
 
+        DownloadStatus(download)
+
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(state.hits, key = { it.peer + it.filename }) { hit ->
-                ResultRow(hit)
+                ResultRow(hit, onDownload = { SonoraBackend.download(context, hit) })
                 HorizontalDivider()
             }
         }
@@ -89,10 +97,47 @@ fun SearchScreen() {
 }
 
 @Composable
-private fun ResultRow(hit: SearchHit) {
+private fun DownloadStatus(state: DownloadState) {
+    when (state) {
+        DownloadState.Idle -> Unit
+
+        is DownloadState.Downloading -> {
+            Text(
+                text = "Downloading ${state.filename} \u2014 " +
+                    (state.fraction?.let { "${(it * 100).toInt()}%" } ?: formatSize(state.bytes)),
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(vertical = 8.dp),
+            )
+            LinearProgressIndicator(
+                progress = { state.fraction ?: 0f },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        is DownloadState.Completed -> Text(
+            text = "Saved ${state.filename} (${formatSize(state.bytes)})",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(vertical = 8.dp),
+        )
+
+        is DownloadState.Failed -> Text(
+            text = "Download failed: ${state.reason}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(vertical = 8.dp),
+        )
+    }
+}
+
+@Composable
+private fun ResultRow(hit: SearchHit, onDownload: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onDownload)
             .padding(vertical = 8.dp),
     ) {
         Text(

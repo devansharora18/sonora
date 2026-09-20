@@ -2,9 +2,11 @@ package dev.sonora.backend
 
 import android.content.Context
 import android.util.Log
+import dev.sonora.protocol.DownloadOutcome
 import dev.sonora.protocol.SoulseekSession
 import dev.sonora.protocol.server.LoginResponse
 import dev.sonora.service.SonoraService
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -43,6 +46,13 @@ object SonoraBackend {
 
     private val WHITESPACE = Regex("\\s+")
 
+    /** Anything that could act as a path separator, or that file systems dislike. */
+    private val UNSAFE_FILENAME = Regex("[^A-Za-z0-9 ._()\\[\\]&'-]")
+
+    private const val DOWNLOAD_DIRECTORY = "downloads"
+    private const val MAX_FILENAME_LENGTH = 180
+    private const val PROGRESS_POLL_MS = 400L
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _state = MutableStateFlow<BackendState>(BackendState.Idle)
@@ -54,6 +64,80 @@ object SonoraBackend {
     private val _search = MutableStateFlow(SearchState())
 
     val search: StateFlow<SearchState> = _search.asStateFlow()
+
+    private val _download = MutableStateFlow<DownloadState>(DownloadState.Idle)
+
+    val download: StateFlow<DownloadState> = _download.asStateFlow()
+
+    /**
+     * Downloads one search result into app-private storage.
+     *
+     * One at a time for now: concurrent transfers need their own queueing and progress story,
+     * and a single download is what the flow needs to work first.
+     */
+    fun download(context: Context, hit: SearchHit) {
+        val current = session ?: return
+        if (_download.value is DownloadState.Downloading) return
+
+        val directory = File(context.filesDir, DOWNLOAD_DIRECTORY).apply { mkdirs() }
+        val destination = destinationFor(directory, hit.filename)
+        val name = destination.name
+
+        _download.value = DownloadState.Downloading(
+            filename = name,
+            peer = hit.peer,
+            bytes = 0,
+            totalBytes = hit.size,
+        )
+
+        scope.launch {
+            // The session reports no progress, so poll the file being written. Cheap, and it
+            // avoids threading a callback through the transfer layer for a UI concern.
+            val progress = launch {
+                while (isActive) {
+                    delay(PROGRESS_POLL_MS)
+                    _download.update { state ->
+                        if (state is DownloadState.Downloading) {
+                            state.copy(bytes = destination.length())
+                        } else {
+                            state
+                        }
+                    }
+                }
+            }
+
+            val outcome = current.download(hit.peer, hit.filename, destination, hit.size)
+            progress.cancel()
+
+            _download.value = when (outcome) {
+                is DownloadOutcome.Completed ->
+                    DownloadState.Completed(name, outcome.bytes, destination.absolutePath)
+
+                is DownloadOutcome.Failed -> DownloadState.Failed(name, outcome.reason)
+            }
+        }
+    }
+
+    /**
+     * Builds a destination filename from a peer-supplied virtual path.
+     *
+     * Names come from strangers, so separators are stripped and the resolved path is checked
+     * against the download directory — a name like `..` would otherwise write outside it.
+     */
+    private fun destinationFor(directory: File, virtualPath: String): File {
+        val name = virtualPath
+            .substringAfterLast('\\')
+            .substringAfterLast('/')
+            .replace(UNSAFE_FILENAME, "_")
+            .trim()
+            .take(MAX_FILENAME_LENGTH)
+            .ifBlank { "download" }
+
+        val candidate = File(directory, name)
+        val root = directory.canonicalPath + File.separator
+
+        return if (candidate.canonicalPath.startsWith(root)) candidate else File(directory, "download")
+    }
 
     /**
      * Searches the network, streaming results into [search] as peers answer.
