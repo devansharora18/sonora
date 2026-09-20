@@ -37,6 +37,13 @@ class MessageReader(private val buffer: ByteBuffer) {
 
     fun readString(): String = String(readBytes(), Charsets.ISO_8859_1)
 
+    /** Byte at an offset ahead of the cursor, without consuming it. */
+    fun byteAt(offset: Int): Int = buffer.get(buffer.position() + offset).toInt() and 0xFF
+
+    fun skip(count: Int) {
+        buffer.position(buffer.position() + count)
+    }
+
     /** Everything left in the buffer. */
     fun readRemaining(): ByteArray {
         val bytes = ByteArray(buffer.remaining())

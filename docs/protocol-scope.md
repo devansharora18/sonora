@@ -55,9 +55,13 @@ server sends a rejection reason (`INVALIDUSERNAME`, `EMPTYPASS`, `INVALIDPASS`,
 extension, and a variable attribute list (`0` bitrate, `1` duration, `2` VBR, `4` sample
 rate, `5` bit depth), plus `slotfree`, `avgspeed`, and `queue length`.
 
-> ⚠️ The reference lists `zlib compress` as the final step of `FileSearchResponse`. The
-> payload is compressed. Confirm the exact framing boundary (what is compressed — body
-> only, or including the code) during the spike; this is not spelled out precisely.
+`FileSearchResponse` compresses **everything after the message code** with zlib (RFC 1950)
+at level 4. The length prefix covers the code plus the compressed body, and the body is
+inflated before parsing.
+
+Resolved from Nicotine+'s `slskmessages.py` rather than guessed: `make_network_message()`
+returns `zlib.compress(packed_body, 4)`. Done this way because the prose reference does not
+specify where the compression boundary falls.
 
 ### C. Download
 
@@ -140,17 +144,25 @@ reshare. Recommend splitting reshare out of the initial spike.
   `Login` with an unknown username succeeds and creates the account. This is why the server
   rules forbid randomly generated usernames — junk logins create junk accounts. It also
   means onboarding can offer account creation directly (see PRD D6).
-- **Zlib on search responses** (above) is the least-documented detail and the most likely
-  first blocker in the spike.
+- **Zlib on search responses** — resolved (see above). Everything after the code is
+  compressed; the body must be inflated before parsing.
+- **Real-world wire quirks the prose spec omits.** Nicotine+'s implementation carries
+  workarounds that are not in the reference document. One found so far: for files over
+  2 GiB, Soulseek NS writes the top four bytes of the file size as `0xFFFFFFFF` instead of
+  zeros, which would otherwise unpack as roughly 16 EiB. Expect more of these; the
+  implementation is the authority where the two disagree.
+- **Paths use backslash separators** on the wire, regardless of the peer's platform.
 
-## Suggested spike target
+## Spike progress
 
-The smallest end-to-end slice that proves the approach, in order:
-
-1. TCP connect to a server, send `Login`, parse the response. **Proves framing + MD5.**
-2. Send `SetWaitPort`, `SetStatus`, `SharedFoldersFiles`. **Proves the session stays up.**
-3. Send `FileSearch`, receive and parse at least one `FileSearchResponse`. **Proves the
-   peer connection path and the zlib handling — the two hardest unknowns.**
+1. ~~TCP connect, `Login`, parse the response~~ — **done.** Framing and MD5 confirmed
+   against the live server: the returned password hash and `ownIp` both matched exactly.
+2. ~~`SetWaitPort`, `SetStatus`, `SharedFoldersFiles`~~ — **done.** The server pushed six
+   well-formed messages in reply (64, 83, 84, 104, 69, 160), confirming sequential frames
+   parse off a single stream without desyncing.
+3. **`FileSearch` → `FileSearchResponse`** — message formats implemented and unit-tested
+   offline, zlib included. **Not yet proven live:** peers connect *to us* to deliver
+   results, so this needs a listening peer socket before it can be tested end to end.
 
 Download and reshare come after. If step 3 works, the rest is mechanical; if it doesn't,
 nothing later matters.
