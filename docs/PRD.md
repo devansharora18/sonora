@@ -1,10 +1,11 @@
 # PRD: Sonora — P2P Music Streaming App (Android)
 
-**Status:** Draft v0.2 · **Owner:** TBD · **Last updated:** 2026-09-20
+**Status:** Draft v0.3 · **Owner:** TBD · **Last updated:** 2026-09-20
 
-> v0.2 adds §15 (Engineering Constraints & Decisions), which records findings from a
-> technical review of v0.1. Sections 1–14 are the original product intent, lightly
-> tightened. §15 is the only section that introduces new commitments.
+> v0.2 added §15 (Engineering Constraints & Decisions). v0.3 revises §1 and §7: the
+> embedded-.NET backend was proven infeasible (D9) and the project has committed to a
+> Kotlin-native Soulseek implementation. Decision-log entries D1, D4, D5, D7 and D8 still
+> reflect the .NET architecture and are reconciled separately.
 
 ---
 
@@ -12,10 +13,9 @@
 
 A native Android music player that connects to the Soulseek P2P network to search,
 download, and play music. Unlike server-hosted P2P clients (e.g. slskd deployed on a
-VPS), the backend runs on-device: the Soulseek protocol daemon (slskd, .NET) is
-embedded inside the Android app process as a foreground service, and the Kotlin UI
-talks to it over a local HTTP/WebSocket API (`localhost`). No server infrastructure is
-required for a single user.
+VPS), everything runs on-device: the Soulseek protocol is implemented natively in Kotlin
+and runs inside an Android foreground service, in the same process as the UI. No server
+infrastructure is required for a single user, and no foreign runtime is embedded.
 
 ## 2. Problem Statement
 
@@ -77,12 +77,13 @@ want:
 ┌──────────────────────────────────────────────┐
 │                 Android app                  │
 │                                              │
-│   Kotlin UI (Compose)                        │
-│        │  localhost HTTP + WebSocket         │
-│        ▼                                     │
-│   Foreground Service                         │
-│   └─ embedded .NET runtime                   │
-│      └─ slskd core (Kestrel → 127.0.0.1)     │
+│   Compose UI  ───────────────┐               │
+│                              │  Kotlin call  │
+│   Foreground Service         ▼               │
+│   └─ Soulseek client (Kotlin)                │
+│      ├─ server connection (TCP)              │
+│      ├─ peer connections (TCP)               │
+│      └─ search / transfers / sharing         │
 │                                              │
 │   Room DB (library)  ·  Media3 (playback)    │
 └──────────────────┬───────────────────────────┘
@@ -91,44 +92,45 @@ want:
           Soulseek P2P network
 ```
 
-**Key decision:** the UI layer never talks to slskd's C# code directly — no
-application-level JNI bridging, no deep interop. It talks to slskd's existing
-REST/WebSocket API over localhost, exactly as if slskd were a remote server. This keeps
-the Kotlin and .NET codebases decoupled.
+**Key decision (revised):** the backend is Kotlin and lives in the same process as the
+UI, so the original "the UI never talks to C# directly" constraint no longer applies —
+there is one language and one runtime. The backend is still kept behind a narrow
+interface so the UI never reaches into protocol internals, but whether that interface is
+a plain Kotlin API or an HTTP/WebSocket boundary is an open decision (see D10).
 
-> **Scope note (v0.2):** this is one narrow native bootstrap boundary, not zero interop.
-> Kotlin still has to start the .NET runtime and invoke a managed entry point. Treat
-> that boundary as the single highest-risk integration point — see §15, D3.
+> **Superseded:** the original §7 embedded slskd's .NET core in the APK and had the UI
+> talk to it over `localhost` HTTP. That was proven infeasible — see D9.
 
-### 7.1 Backend (.NET / embedded slskd)
+### 7.1 Backend (Kotlin, native Soulseek implementation)
 
-- Package slskd's core (minus web-UI-specific code) via .NET for Android, embedded in
-  the same APK.
-- Run inside an Android foreground service (`StartForegroundService()`), with a
-  persistent notification (Android requirement, and good UX — "Sharing N files,
-  downloading M").
-- Bind Kestrel to `127.0.0.1` only — never expose the local API beyond the device.
+- Implement the Soulseek protocol natively: server connection, peer connections, search,
+  transfers, and file sharing.
+- Run inside an Android foreground service, with a persistent notification (Android
+  requirement, and good UX — "Sharing N files, downloading M").
 - Handle Android lifecycle: Doze, battery optimization exemptions, service restart on
   crash.
-- Persist slskd config (credentials, shared folders, download path) in app-private
-  storage.
+- Persist credentials, shared folders, and download path in app-private storage, with
+  credentials backed by Android Keystore.
+
+The protocol is publicly documented and has several reference implementations to work
+from — Nicotine+ (Python), slskd and Soulseek.NET (C#). See D4 for the licensing
+consequences of using them as references.
 
 ### 7.2 Frontend (Kotlin / Jetpack Compose)
 
-- Compose UI, MVVM/MVI, Kotlin Flow for reactive state from the local API (polling or
-  WebSocket subscription for transfer progress).
+- Compose UI, MVVM/MVI, Kotlin Flow for reactive state.
 - Media3/ExoPlayer for playback, integrated with MediaSession for lock-screen,
   Bluetooth, and Android Auto controls.
-- Room DB for local library metadata — the app owns the music-library layer; slskd owns
-  the P2P transfer layer only.
-- Retrofit/OkHttp (or Ktor) client for the local API.
+- Room DB for local library metadata.
+- The app owns both the library and the transfer layer — there is no second state store
+  to reconcile against (see D5).
 
 ### 7.3 Storage
 
 - Downloads land in app-scoped storage, or a user-chosen shared-storage location via SAF
   if files need to be visible outside the app.
-- Reshared files come from slskd's configured shared folders — open question whether
-  that equals the download folder (see §13).
+- Reshared files come from configured shared folders — open question whether that equals
+  the download folder (see §13).
 
 ## 8. Feature Scope (MVP vs. Later)
 
@@ -313,3 +315,70 @@ HTTP) unless the app explicitly opts in. Mitigated with a narrowly scoped
 If Kestrel is ever put behind HTTPS on loopback this exemption becomes unnecessary, but a
 local self-signed certificate introduces its own trust-anchor problem, so plain HTTP over
 loopback remains the simpler choice.
+
+### D9 — .NET cannot be hosted inside a Kotlin app · **Decided — option B**
+
+Spike result, 2026-09-20. Built with .NET SDK 10.0.401 and `android` workload 36.1.69.
+
+| Test | Result |
+| ---- | ------ |
+| `dotnet new androidlib` + `dotnet build -c Release` | Emits `NetProbe.dll` **only** — no AAR, JAR, `.so`, or Java stubs |
+| AAR target inputs (`Microsoft.Android.Sdk.AndroidLibraries.targets`) | `AndroidAsset`, resources, `AndroidEnvironment`, `AndroidJavaLibrary`, `AndroidManifest`, `EmbeddedJar`, `EmbeddedNativeLibrary`, `ProguardConfiguration` — **no managed assemblies, no runtime** |
+| `dotnet new android` app APK | Contains `libmonodroid.so` (1.4 MB), `libmonosgen-2.0.so` (3.1 MB), `libxamarin-app.so`, and a 21 KB `classes.dex` |
+
+.NET for Android is an **application** framework. The Mono runtime, the JNI bootstrap, and
+the generated app glue are injected at the application level by the .NET Android SDK, into
+an APK whose entry point is .NET-owned Java code. A .NET Android *library* carries only
+managed IL and is consumable only by another .NET Android app (via NuGet `lib/<tfm>/`).
+There is no supported path to boot the Mono runtime from a Kotlin-hosted Android `Service`.
+
+**Therefore §7's "package slskd's core, embed it in the APK, run it inside a Kotlin-hosted
+foreground service" is not achievable as written.** The rest of §7 (Kotlin/Compose UI,
+Media3, Room) is unaffected.
+
+**Options:**
+
+- **A — Flip ownership.** Make the app a .NET Android app that owns the APK, the
+  foreground service, and the P2P backend; expose the Kotlin/Compose UI as an Android
+  library (AAR) it references. Keeps on-device P2P and reuses a working protocol
+  implementation. Cost: the primary build system becomes MSBuild, and hosting a Compose
+  AAR inside a .NET app needs its own validation spike.
+- **B — Implement the protocol in Kotlin.** Drop .NET entirely; implement the Soulseek
+  protocol natively (it is publicly documented; Nicotine+, slskd and Soulseek.NET are
+  references). Single toolchain, smallest APK, and §7's Kotlin-side design survives
+  intact — only the backend language changes. Cost: implementing server protocol, peer
+  connections, search, transfers and sharing is a substantial body of work.
+- **C — Two apps** (Kotlin UI + .NET backend). Rejected: two APKs, contradicts §1, and
+  cross-app service control is fragile.
+- **D — Server-backed.** That is §11's iOS path; rejected for Android v1, since the entire
+  premise is needing no server.
+
+**Refines D4:** `jpdillingham/Soulseek.NET` is a real, actively maintained .NET *library*
+implementing the Soulseek protocol (GPL-3.0, 229★, last pushed 2026-09-17); slskd is a web
+app built on top of it. So a reusable core does exist — it simply is not reachable from
+Kotlin. Under option A, Soulseek.NET is the dependency and slskd need not be forked at all.
+
+**Affects D1:** Soulseek.NET is GPL-3.0, not AGPL-3.0. If slskd leaves the picture, GPL-3.0
+becomes viable again. AGPL-3.0 remains a defensible choice (Sonora is itself a network
+service), but it is no longer *required*.
+
+**Decision (2026-09-20): option B — implement the protocol in Kotlin.**
+
+Chosen over option A to keep a single toolchain and language, avoid MSBuild as the primary
+build system, produce a far smaller APK, and leave §7's Kotlin-side design intact. The cost
+is owning a protocol implementation; the reference implementations above are inputs to that
+work, not dependencies.
+
+### D10 — Internal API boundary: in-process Kotlin vs. loopback HTTP · **Open**
+
+With a Kotlin-native backend the UI and backend share a process and a language. The original
+localhost HTTP contract existed only because the backend was a different runtime.
+
+- **In-process Kotlin interface** — simpler: no serialization, no port management, no
+  network policy. Makes D8 moot. Loses the ability to point the UI at a remote backend.
+- **Loopback HTTP/WebSocket** — preserves §11's future iOS path (server-backed, thin client)
+  and keeps a hard seam for testing. Costs a serialization layer, and keeps D8's cleartext
+  exemption relevant.
+
+Recommendation: start in-process behind a narrow interface. The seam can be introduced later
+if the server-backed iOS path in §11 becomes real; it does not need designing now.
