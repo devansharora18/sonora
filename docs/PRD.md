@@ -59,8 +59,8 @@ want:
 
 ## 6. Core User Flows
 
-1. **Onboarding** — enter Soulseek credentials → app starts the local backend service →
-   connects to the network.
+1. **Onboarding** — choose or enter Soulseek credentials → app starts the local backend
+   service → connects to the network.
 2. **Search** — query a track/artist/album → results list (file, bitrate/format, size,
    uploader, uploader's queue/speed).
 3. **Download** — select a result → queued → downloaded to local storage → auto-added to
@@ -303,11 +303,27 @@ storage cleanup) while its library row survives. Decide whether on-disk file pre
 authoritative and reconciled on scan, or the database is authoritative and missing files
 are marked unavailable. Small, but it should be explicit.
 
-### D6 — Onboarding is "enter credentials," not "create credentials" · **Constraint**
+### D6 — Onboarding can create accounts · **Corrected**
 
-Soulseek accounts are created out-of-band; there is no self-registration API path. §6's
-"create/enter Soulseek credentials" is really "enter existing credentials," so the
-onboarding flow needs a link out to account creation.
+The original claim here was wrong. It read: *"Soulseek accounts are created out-of-band;
+there is no self-registration API path"*, and concluded onboarding could only accept
+existing credentials.
+
+**Verified against the live server on 2026-09-20:** a `Login` (server code 1) with an
+*unknown* username **succeeds and registers the account**. The server returned a successful
+login for a throwaway username with no prior registration step.
+
+Consequences:
+
+- §6's original wording — "create/enter Soulseek credentials" — was right, and this entry
+  was the error. Onboarding can offer account creation directly: pick a username and
+  password, log in, done. No link-out needed.
+- This explains the server rule forbidding randomly generated usernames: **first login is
+  registration**, so junk usernames create junk accounts on the network.
+- There is still **no password reset**, so credentials must be validated and stored locally.
+
+Verification created one throwaway account (`sonora_protocol_spike_test`) as a side effect —
+unavoidable, since the only way to observe this behaviour is to log in with a new username.
 
 ### D7 — APK size · **Largely resolved by D9**
 

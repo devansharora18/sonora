@@ -135,9 +135,11 @@ reshare. Recommend splitting reshare out of the initial spike.
   reserved for *experimental development and testing*; established clients have unique
   numbers. We must choose one deliberately — using a reserved number would impersonate
   another client.
-- **Login has no password reset.** Credentials must be validated and stored locally, and
-  randomly generated usernames are explicitly disallowed by the server rules (relevant to
-  D6's onboarding flow).
+- **Login has no password reset.** Credentials must be validated and stored locally.
+- **First login registers the account.** Verified against the live server on 2026-09-20: a
+  `Login` with an unknown username succeeds and creates the account. This is why the server
+  rules forbid randomly generated usernames — junk logins create junk accounts. It also
+  means onboarding can offer account creation directly (see PRD D6).
 - **Zlib on search responses** (above) is the least-documented detail and the most likely
   first blocker in the spike.
 
