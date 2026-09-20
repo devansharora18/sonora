@@ -1,5 +1,6 @@
 package dev.sonora.protocol
 
+import dev.sonora.protocol.peer.PeerInit
 import dev.sonora.protocol.peer.SearchResponse
 import dev.sonora.protocol.peer.SearchWire
 import dev.sonora.protocol.server.FileSearch
@@ -149,6 +150,35 @@ class SoulseekSessionTest {
                     // A single assertion covers both halves: reaching the ceiling, and never
                     // exceeding it. A larger peak fails here just as a smaller one does.
                     assertEquals(limit, peer.peakConcurrency)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `connectToUser resolves an address and dials the peer directly`() {
+        FakePeer().use { peer ->
+            FakeSoulseekServer().use { server ->
+                server.peerPort = peer.port
+
+                session(server).use { session ->
+                    session.connect()
+
+                    val connected = checkNotNull(session.connectToUser("some_peer")) {
+                        "expected a direct peer connection"
+                    }
+
+                    assertEquals("some_peer", connected.username)
+                    assertEquals(PeerInit.TYPE_PEER, connected.connectionType)
+
+                    // A direct dial sends PeerInit, not the PierceFireWall used by the indirect
+                    // fallback — so this proves which path was taken. The peer records the
+                    // handshake on its own thread, hence the wait rather than a bare assert.
+                    assertTrue(
+                        "peer never saw a direct ${PeerInit.TYPE_PEER} handshake",
+                        peer.awaitConnectionType(PeerInit.TYPE_PEER),
+                    )
+                    assertEquals(setOf(PeerInit.TYPE_PEER), peer.directConnectionTypes)
                 }
             }
         }

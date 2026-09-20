@@ -1,12 +1,14 @@
 package dev.sonora.protocol
 
 import dev.sonora.protocol.peer.FileSearchResponse
+import dev.sonora.protocol.peer.PeerInit
 import dev.sonora.protocol.peer.PeerListener
 import dev.sonora.protocol.peer.PeerSession
 import dev.sonora.protocol.peer.PierceFireWall
 import dev.sonora.protocol.peer.SearchResponse
 import dev.sonora.protocol.server.ConnectToPeer
 import dev.sonora.protocol.server.FileSearch
+import dev.sonora.protocol.server.GetPeerAddress
 import dev.sonora.protocol.server.Login
 import dev.sonora.protocol.server.LoginResponse
 import dev.sonora.protocol.server.PeerAddress
@@ -14,6 +16,7 @@ import dev.sonora.protocol.server.ServerConnection
 import dev.sonora.protocol.server.SetStatus
 import dev.sonora.protocol.server.SetWaitPort
 import dev.sonora.protocol.server.SharedFoldersFiles
+import dev.sonora.protocol.server.UserAddress
 import java.io.Closeable
 import java.io.EOFException
 import java.net.InetSocketAddress
@@ -21,7 +24,9 @@ import java.net.Socket
 import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.BlockingQueue
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.RejectedExecutionHandler
 import java.util.concurrent.ThreadFactory
 import java.util.concurrent.ThreadPoolExecutor
@@ -64,6 +69,7 @@ class SoulseekSession(
     private val searches = ConcurrentHashMap<Long, (SearchResponse) -> Unit>()
     private val nextToken = AtomicLong(1)
     private val outboundPeers = ConcurrentHashMap.newKeySet<Socket>()
+    private val pendingAddresses = ConcurrentHashMap<String, BlockingQueue<UserAddress>>()
 
     private val dials = ThreadPoolExecutor(
         maxConcurrentPeers,
@@ -147,9 +153,15 @@ class SoulseekSession(
     }
 
     private fun onServerMessage(message: Message) {
-        if (message.code != ConnectToPeer.CODE) return
+        when (message.code) {
+            ConnectToPeer.CODE -> handleConnectToPeer(message.body)
+            GetPeerAddress.CODE -> handlePeerAddress(message.body)
+        }
+    }
 
-        val address = ConnectToPeer.parse(message.body)
+    private fun handleConnectToPeer(body: ByteArray) {
+        // Untrusted: a malformed body must not end the session.
+        val address = runCatching { ConnectToPeer.parse(body) }.getOrNull() ?: return
         onTrace("relay ${address.username} ${address.ipAddress()}:${address.port}")
 
         dials.execute {
@@ -205,6 +217,62 @@ class SoulseekSession(
             outboundPeers -= socket
             socket.close()
         }
+    }
+
+    /**
+     * Resolves a user's address and opens a direct peer connection to them.
+     *
+     * This is where a download starts: search results give a username, but asking a peer for a
+     * file needs a connection to that peer first.
+     *
+     * Returns null when the address cannot be resolved or the peer is unreachable. Both are
+     * ordinary outcomes — plenty of peers are behind NAT themselves — so neither is an exception.
+     * The caller owns the returned session, and it is also closed with this session.
+     */
+    fun connectToUser(username: String): PeerSession? {
+        val connection = checkNotNull(server) { "not connected" }
+
+        val pending = LinkedBlockingQueue<UserAddress>()
+        pendingAddresses[username] = pending
+
+        val address = try {
+            connection.send(GetPeerAddress.CODE, GetPeerAddress.request(username))
+            pending.poll(ADDRESS_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        } finally {
+            pendingAddresses.remove(username)
+        } ?: return null
+
+        return dialDirect(username, address)
+    }
+
+    private fun dialDirect(username: String, address: UserAddress): PeerSession? {
+        val socket = Socket()
+        outboundPeers += socket
+
+        try {
+            socket.connect(
+                InetSocketAddress(address.ipAddress(), address.port.toInt()),
+                CONNECT_TIMEOUT_MS,
+            )
+            socket.soTimeout = PEER_IDLE_TIMEOUT_MS
+
+            Framing.PEER_INIT.write(
+                socket.getOutputStream(),
+                PeerInit.CODE,
+                PeerInit.request(username, PeerInit.TYPE_PEER),
+            )
+
+            return PeerSession(username, PeerInit.TYPE_PEER, socket)
+        } catch (_: Exception) {
+            outboundPeers -= socket
+            socket.close()
+            return null
+        }
+    }
+
+    private fun handlePeerAddress(body: ByteArray) {
+        val address = runCatching { GetPeerAddress.parse(body) }.getOrNull() ?: return
+        pendingAddresses[address.username]?.put(address)
     }
 
     private fun acceptPeer(session: PeerSession) {
@@ -285,5 +353,6 @@ class SoulseekSession(
 
         private const val CONNECT_TIMEOUT_MS = 15_000
         private const val PEER_IDLE_TIMEOUT_MS = 30_000
+        private const val ADDRESS_TIMEOUT_MS = 10_000L
     }
 }

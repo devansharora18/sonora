@@ -16,6 +16,17 @@ object PeerInit {
     const val TYPE_FILE = "F"
     const val TYPE_DISTRIBUTED = "D"
 
+    /**
+     * Builds an outbound handshake. Sent when dialling a peer directly — the token is legacy
+     * and ignored today.
+     */
+    fun request(username: String, connectionType: String, token: Long = 0L): ByteArray =
+        MessageWriter()
+            .writeString(username)
+            .writeString(connectionType)
+            .writeUInt32(token)
+            .toByteArray()
+
     fun parse(body: ByteArray): PeerHandshake {
         val reader = MessageReader(body)
         return PeerHandshake(

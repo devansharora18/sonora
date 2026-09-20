@@ -2,6 +2,7 @@ package dev.sonora.protocol
 
 import dev.sonora.protocol.peer.PeerInit
 import dev.sonora.protocol.server.ConnectToPeer
+import dev.sonora.protocol.server.GetPeerAddress
 import dev.sonora.protocol.server.Login
 import dev.sonora.protocol.server.LoginResponse
 import dev.sonora.protocol.server.ServerConnection
@@ -40,6 +41,13 @@ internal class FakeSoulseekServer(
     var loginBody: ByteArray? = null
         private set
 
+    /**
+     * Port reported for every resolved address. Point it at a [FakePeer] so the session's
+     * outbound dial lands there.
+     */
+    @Volatile
+    var peerPort: Int = 0
+
     val port: Int get() = server.localPort
 
     init {
@@ -56,7 +64,15 @@ internal class FakeSoulseekServer(
                 loginBody = login.body
 
                 conn.send(Login.CODE, loginBody(loginResponse))
-                conn.startReading { received.put(it) }
+                conn.startReading { message ->
+                    received.put(message)
+
+                    // Answer address lookups, since a dial-back needs one to get anywhere.
+                    if (message.code == GetPeerAddress.CODE) {
+                        val username = MessageReader(message.body).readString()
+                        conn.send(GetPeerAddress.CODE, addressBody(username, peerPort))
+                    }
+                }
             } catch (_: Exception) {
                 // Closed before a client connected.
             }
@@ -110,6 +126,14 @@ internal class FakeSoulseekServer(
         client?.close()
         server.close()
     }
+
+    private fun addressBody(username: String, port: Int): ByteArray = MessageWriter()
+        .writeString(username)
+        .writeUInt32(LOOPBACK_IP)
+        .writeUInt32(port.toLong())
+        .writeUInt32(0) // obfuscation type
+        .writeUInt16(0) // obfuscated port
+        .toByteArray()
 
     private fun loginBody(response: LoginResponse): ByteArray = when (response) {
         is LoginResponse.Success -> MessageWriter()

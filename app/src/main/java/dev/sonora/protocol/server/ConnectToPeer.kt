@@ -42,6 +42,15 @@ object ConnectToPeer {
     }
 }
 
+/**
+ * Renders a packed uint32 IPv4 address.
+ *
+ * The wire stores it little-endian — Nicotine+ reverses the four bytes before `inet_ntoa` — so
+ * the uint32's most significant byte is the first octet.
+ */
+internal fun formatIpv4(ip: Long): String =
+    listOf(24, 16, 8, 0).joinToString(".") { ((ip ushr it) and 0xFF).toString() }
+
 /** A peer's address, as relayed by the server. */
 data class PeerAddress(
     val username: String,
@@ -54,12 +63,6 @@ data class PeerAddress(
     val token: Long,
     val isPrivileged: Boolean,
 ) {
-    /**
-     * Dotted-quad form, for dialling.
-     *
-     * The wire stores the address little-endian (Nicotine+ reverses the four bytes before
-     * `inet_ntoa`), so the uint32's most significant byte is the first octet.
-     */
-    fun ipAddress(): String = listOf(24, 16, 8, 0)
-        .joinToString(".") { ((ip ushr it) and 0xFF).toString() }
+    /** Dotted-quad form, for dialling. */
+    fun ipAddress(): String = formatIpv4(ip)
 }

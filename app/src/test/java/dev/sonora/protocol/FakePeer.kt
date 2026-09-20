@@ -1,6 +1,8 @@
 package dev.sonora.protocol
 
 import dev.sonora.protocol.peer.FileSearchResponse
+import dev.sonora.protocol.peer.PeerInit
+import dev.sonora.protocol.peer.PierceFireWall
 import java.io.Closeable
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -29,6 +31,7 @@ internal class FakePeer(
     private val peak = AtomicInteger()
     private val release = CountDownLatch(1)
     private val handshakeTokens = ConcurrentHashMap.newKeySet<Long>()
+    private val connectionTypes = ConcurrentHashMap.newKeySet<String>()
 
     val port: Int get() = server.localPort
 
@@ -37,6 +40,9 @@ internal class FakePeer(
 
     /** Tokens seen in `PierceFireWall` handshakes. */
     val tokens: Set<Long> get() = handshakeTokens
+
+    /** Connection types seen in direct `PeerInit` handshakes — `P`, `F` or `D`. */
+    val directConnectionTypes: Set<String> get() = connectionTypes
 
     init {
         thread(isDaemon = true, name = "fake-peer") { acceptLoop() }
@@ -64,7 +70,22 @@ internal class FakePeer(
     private fun handle(socket: Socket) {
         try {
             val handshake = Framing.PEER_INIT.read(socket.getInputStream())
-            val token = MessageReader(handshake.body).readUInt32()
+
+            val token: Long = when (handshake.code) {
+                // Indirect: the peer dialled us back after we sent PierceFireWall.
+                PierceFireWall.CODE -> MessageReader(handshake.body).readUInt32()
+
+                // Direct: the session dialled us.
+                PeerInit.CODE -> {
+                    val reader = MessageReader(handshake.body)
+                    reader.readString() // username
+                    connectionTypes += reader.readString()
+                    reader.readUInt32()
+                }
+
+                else -> return
+            }
+
             handshakeTokens += token
 
             reply(token)?.let { body ->
@@ -90,6 +111,18 @@ internal class FakePeer(
             Thread.sleep(POLL_INTERVAL_MS)
         }
         return peak.get() >= count
+    }
+
+    /**
+     * Waits until a direct handshake of [type] has been seen. The peer records handshakes on its
+     * own thread, so a caller that has just dialled must wait rather than assert immediately.
+     */
+    fun awaitConnectionType(type: String, timeoutMillis: Long = 5_000): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (System.currentTimeMillis() < deadline && !connectionTypes.contains(type)) {
+            Thread.sleep(POLL_INTERVAL_MS)
+        }
+        return connectionTypes.contains(type)
     }
 
     override fun close() {
