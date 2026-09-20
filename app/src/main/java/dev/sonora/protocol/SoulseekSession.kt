@@ -68,6 +68,11 @@ class SoulseekSession(
      * stricter about this than a desktop.
      */
     private val maxConcurrentPeers: Int = DEFAULT_MAX_CONCURRENT_PEERS,
+    /**
+     * How long [download] waits for the file connection and then for the bytes. One blunt ceiling
+     * over the whole transfer — a real client wants progress-aware policy rather than a timeout.
+     */
+    private val transferTimeoutMillis: Long = DEFAULT_TRANSFER_TIMEOUT_MS,
     /** Diagnostic sink: peer connection attempts and their outcome. Used by the live spikes. */
     private val onTrace: (String) -> Unit = {},
 ) : Closeable {
@@ -169,7 +174,7 @@ class SoulseekSession(
     private fun handleConnectToPeer(body: ByteArray) {
         // Untrusted: a malformed body must not end the session.
         val address = runCatching { ConnectToPeer.parse(body) }.getOrNull() ?: return
-        onTrace("relay ${address.username} ${address.ipAddress()}:${address.port}")
+        onTrace("relay ${address.username} ${address.connectionType} ${address.ipAddress()}:${address.port}")
 
         dials.execute {
             try {
@@ -295,7 +300,7 @@ class SoulseekSession(
         }
 
         return try {
-            if (!transfer.completion.await(TRANSFER_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+            if (!transfer.completion.await(transferTimeoutMillis, TimeUnit.MILLISECONDS)) {
                 DownloadOutcome.Failed("the peer never opened a file connection")
             } else {
                 transfer.outcome ?: DownloadOutcome.Failed("the transfer ended without a result")
@@ -508,10 +513,10 @@ class SoulseekSession(
         private const val ADDRESS_TIMEOUT_MS = 10_000L
 
         /**
-         * How long [download] waits for the peer to open a file connection and finish sending.
-         * A real client wants a progress-aware policy here rather than one generous ceiling.
+         * Default ceiling for a whole transfer. Generous, because a peer may queue us before it
+         * starts sending.
          */
-        private const val TRANSFER_TIMEOUT_MS = 300_000L
+        const val DEFAULT_TRANSFER_TIMEOUT_MS = 300_000L
     }
 }
 
