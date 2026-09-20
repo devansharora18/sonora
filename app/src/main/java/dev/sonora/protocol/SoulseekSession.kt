@@ -20,7 +20,12 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketException
 import java.net.SocketTimeoutException
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.RejectedExecutionHandler
+import java.util.concurrent.ThreadFactory
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 
@@ -44,6 +49,14 @@ class SoulseekSession(
     private val host: String = DEFAULT_HOST,
     private val port: Int = DEFAULT_PORT,
     private val listenPort: Int = SetWaitPort.DEFAULT_PORT,
+    /**
+     * Upper bound on peer connections dialled at once.
+     *
+     * A single search can produce thousands of relays, so this must be capped — one thread and
+     * one socket per relay exhausts file descriptors and takes the process down. Android is
+     * stricter about this than a desktop.
+     */
+    private val maxConcurrentPeers: Int = DEFAULT_MAX_CONCURRENT_PEERS,
     /** Diagnostic sink: peer connection attempts and their outcome. Used by the live spikes. */
     private val onTrace: (String) -> Unit = {},
 ) : Closeable {
@@ -51,6 +64,16 @@ class SoulseekSession(
     private val searches = ConcurrentHashMap<Long, (SearchResponse) -> Unit>()
     private val nextToken = AtomicLong(1)
     private val outboundPeers = ConcurrentHashMap.newKeySet<Socket>()
+
+    private val dials = ThreadPoolExecutor(
+        maxConcurrentPeers,
+        maxConcurrentPeers,
+        0L,
+        TimeUnit.MILLISECONDS,
+        ArrayBlockingQueue(DIAL_QUEUE_CAPACITY),
+        ThreadFactory { runnable -> thread(isDaemon = true, name = "sonora-dial") { runnable.run() } },
+        RejectedExecutionHandler { _, _ -> onTrace("relay dropped: dial queue full") },
+    )
 
     private var server: ServerConnection? = null
     private var listener: PeerListener? = null
@@ -124,7 +147,7 @@ class SoulseekSession(
         val address = ConnectToPeer.parse(message.body)
         onTrace("relay ${address.username} ${address.ipAddress()}:${address.port}")
 
-        thread(name = "sonora-dial-${address.username}", isDaemon = true) {
+        dials.execute {
             try {
                 dialPeer(address) { onPeerMessage(address.username, it) }
             } catch (e: Exception) {
@@ -225,6 +248,7 @@ class SoulseekSession(
         searches.clear()
         listener?.close()
         server?.close()
+        dials.shutdownNow()
         outboundPeers.forEach { it.close() }
         outboundPeers.clear()
         server = null
@@ -240,6 +264,19 @@ class SoulseekSession(
          */
         const val MAJOR_VERSION = 177
         const val MINOR_VERSION = 1
+
+        /**
+         * Conservative default: narrow enough to stay well inside a phone's per-process file
+         * descriptor limit, wide enough that results still stream in promptly.
+         */
+        const val DEFAULT_MAX_CONCURRENT_PEERS = 50
+
+        /**
+         * Relays are tiny, so queuing is cheap and generous — the scarce resource is sockets,
+         * not queue entries. Overflow is dropped rather than letting the queue grow without
+         * bound, and is reported through the trace.
+         */
+        private const val DIAL_QUEUE_CAPACITY = 8192
 
         private const val CONNECT_TIMEOUT_MS = 15_000
         private const val PEER_IDLE_TIMEOUT_MS = 30_000

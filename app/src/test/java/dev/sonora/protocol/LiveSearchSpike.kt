@@ -1,9 +1,11 @@
 package dev.sonora.protocol
 
-import dev.sonora.protocol.peer.SearchResponse
+import dev.sonora.protocol.peer.SharedFile
 import dev.sonora.protocol.server.LoginResponse
-import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -32,7 +34,12 @@ class LiveSearchSpike {
         val (username, password) = LiveServer.credentialsOrSkip()
         val query = LiveServer.query()
 
-        val responses = LinkedBlockingQueue<SearchResponse>()
+        // One query can return hundreds of thousands of files, so count them rather than
+        // retaining them: what is under test is the protocol, not the results.
+        val firstResponse = CountDownLatch(1)
+        val responseCount = AtomicInteger()
+        val fileCount = AtomicInteger()
+        val sample = CopyOnWriteArrayList<SharedFile>()
 
         SoulseekSession(
             username = username,
@@ -43,12 +50,17 @@ class LiveSearchSpike {
             println("[spike] login: $login")
             assertTrue("login rejected: $login", login is LoginResponse.Success)
 
-            session.search(query) { responses += it }
+            session.search(query) { response ->
+                responseCount.incrementAndGet()
+                fileCount.addAndGet(response.files.size)
+                if (sample.size < SAMPLE_SIZE) {
+                    sample.addAll(response.files.take(SAMPLE_SIZE - sample.size))
+                }
+                firstResponse.countDown()
+            }
             println("[spike] search sent: query=\"$query\"")
 
-            val first = responses.poll(SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-
-            if (first == null) {
+            if (!firstResponse.await(SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 fail(
                     "no search response arrived — check the trace above to tell a network " +
                         "problem from a code problem",
@@ -57,24 +69,21 @@ class LiveSearchSpike {
 
             // Results stream in as peers answer rather than arriving in one batch, so let the
             // first tranche settle before counting — otherwise the numbers describe only the
-            // single fastest peer.
+            // fastest peers to respond.
             Thread.sleep(DRAIN_WINDOW_MS)
 
-            val collected = mutableListOf(first as SearchResponse)
-            responses.drainTo(collected)
-            val files = collected.flatMap { it.files }
-
-            println("[spike] ${collected.size} response(s), ${files.size} file(s)")
-            files.take(5).forEach {
+            println("[spike] ${responseCount.get()} response(s), ${fileCount.get()} file(s)")
+            sample.forEach {
                 println("[spike]   ${it.filename}  ${it.size} bytes  ${it.attributes}")
             }
 
-            assertTrue("responses arrived but carried no files", files.isNotEmpty())
+            assertTrue("responses arrived but carried no files", fileCount.get() > 0)
         }
     }
 
     private companion object {
         const val SEARCH_TIMEOUT_SECONDS = 60L
         const val DRAIN_WINDOW_MS = 5_000L
+        const val SAMPLE_SIZE = 5
     }
 }
