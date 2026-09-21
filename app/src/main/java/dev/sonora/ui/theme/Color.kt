@@ -14,7 +14,7 @@ internal object SonoraColors {
     val OnSurfaceFaint = Color(0xFF8A8A8A)
     val Outline = Color(0xFF535353)
 
-    val Accent = Color(0xFF1DB954)
+    val Accent = Color(0xFFFF0033)
     val OnAccent = Color(0xFF000000)
 
     val Error = Color(0xFFFF8A80)
