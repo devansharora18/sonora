@@ -5,6 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,10 +17,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
@@ -46,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.sonora.backend.LibraryGrouping
 import dev.sonora.backend.LibraryTrack
 import dev.sonora.backend.MusicDirectory
 import dev.sonora.backend.PlaybackState
@@ -57,6 +61,7 @@ import dev.sonora.ui.theme.accentText
 
 private enum class LibrarySection(val label: String) {
     Tracks("Tracks"),
+    Albums("Albums"),
     Playlists("Playlists"),
 }
 
@@ -69,6 +74,7 @@ fun LibraryScreen() {
     var section by remember { mutableStateOf(LibrarySection.Tracks) }
     var creating by remember { mutableStateOf(false) }
     var openPlaylistId by remember { mutableStateOf<String?>(null) }
+    var openAlbum by remember { mutableStateOf<LibraryGrouping.Album?>(null) }
     var addTarget by remember { mutableStateOf<LibraryTrack?>(null) }
     var deleteTarget by remember { mutableStateOf<LibraryTrack?>(null) }
     var failedDelete by remember { mutableStateOf<LibraryTrack?>(null) }
@@ -83,6 +89,7 @@ fun LibraryScreen() {
     // a playlist should report and play what is actually there.
     val byPath = remember(tracks) { tracks.associateBy { it.file.absolutePath } }
     val likedPaths = remember(playlists) { Playlists.likedPaths(playlists) }
+    val albums = remember(tracks) { LibraryGrouping.albums(tracks) }
 
     // Delete is only offered for files in the download folder. Now that the library also lists music
     // from the rest of the device, offering to delete someone's own collection would be wrong.
@@ -91,6 +98,17 @@ fun LibraryScreen() {
     // Held by id, not by value, so a rename or a removal is reflected immediately — and so a
     // deleted playlist closes the screen instead of showing a stale copy.
     val open = openPlaylistId?.let { id -> playlists.firstOrNull { it.id == id } }
+    val album = openAlbum
+
+    if (album != null) {
+        BackHandler { openAlbum = null }
+        AlbumDetailScreen(
+            album = album,
+            onBack = { openAlbum = null },
+            onPlayFrom = { index -> SonoraPlayer.play(context, album.tracks, index) },
+        )
+        return
+    }
 
     if (open != null) {
         val contents = open.trackPaths.mapNotNull { byPath[it] }
@@ -121,7 +139,10 @@ fun LibraryScreen() {
         )
 
         Row(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             LibrarySection.entries.forEach { entry ->
@@ -160,6 +181,11 @@ fun LibraryScreen() {
                     onToggleLike = { SonoraBackend.toggleLiked(context, it) },
                     onAddToPlaylist = { addTarget = it },
                     onDelete = { deleteTarget = it },
+                )
+
+                LibrarySection.Albums -> AlbumsSection(
+                    albums = albums,
+                    onOpen = { openAlbum = it },
                 )
 
                 LibrarySection.Playlists -> PlaylistsSection(
@@ -296,6 +322,84 @@ private fun TracksSection(
 }
 
 @Composable
+private fun AlbumsSection(
+    albums: List<LibraryGrouping.Album>,
+    onOpen: (LibraryGrouping.Album) -> Unit,
+) {
+    if (albums.isEmpty()) {
+        EmptyState(
+            icon = Icons.Filled.Album,
+            title = "No albums found",
+            message = "Download music, or add files to Music/Soulseek.",
+        )
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        items(albums, key = { it.name + it.artist }) { album ->
+            AlbumRow(album = album, onClick = { onOpen(album) })
+        }
+    }
+}
+
+@Composable
+private fun AlbumRow(album: LibraryGrouping.Album, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Tile {
+            // Artwork from the album's first track: the album has no artwork of its own, and the
+            // files of one album normally carry the same embedded cover.
+            val artwork = album.tracks.firstOrNull()?.let { rememberArtwork(it.file) }
+            if (artwork != null) {
+                Image(
+                    bitmap = artwork,
+                    contentDescription = "Album artwork",
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Filled.MusicNote,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 14.dp),
+        ) {
+            Text(
+                text = album.name,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = listOf(
+                    album.artist,
+                    if (album.tracks.size == 1) "1 track" else "${album.tracks.size} tracks",
+                ).joinToString("  \u00b7  "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
 private fun PlaylistsSection(
     playlists: List<Playlist>,
     byPath: Map<String, LibraryTrack>,
@@ -415,101 +519,62 @@ private fun TrackRow(
     onAddToPlaylist: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onPlay)
-            .padding(horizontal = 20.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Tile {
-            val artwork = rememberArtwork(track.file)
-            if (artwork != null) {
-                Image(
-                    bitmap = artwork,
-                    contentDescription = "Album artwork",
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
+    TrackListRow(
+        track = track,
+        meta = listOfNotNull(track.artist, track.album, formatBytes(track.size))
+            .joinToString("  \u00b7  "),
+        isPlaying = isPlaying,
+        onClick = onPlay,
+        trailing = {
+            IconButton(onClick = onToggleLike) {
                 Icon(
-                    imageVector = Icons.Filled.MusicNote,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(start = 14.dp),
-        ) {
-            Text(
-                text = track.title,
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (isPlaying) {
-                    MaterialTheme.colorScheme.accentText
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-
-            Text(
-                text = listOfNotNull(track.artist, track.album, formatBytes(track.size))
-                    .joinToString("  \u00b7  "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-
-        IconButton(onClick = onToggleLike) {
-            Icon(
-                imageVector = if (isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                contentDescription = if (isLiked) "Remove from Liked Songs" else "Add to Liked Songs",
-                tint = if (isLiked) {
-                    MaterialTheme.colorScheme.accentText
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
-        }
-
-        // Deleting sits behind a menu rather than on the row: a bare delete icon beside every track
-        // is one mis-tap away from destroying music, which is not recoverable.
-        var menuOpen by remember { mutableStateOf(false) }
-
-        Box {
-            IconButton(onClick = { menuOpen = true }) {
-                Icon(
-                    imageVector = Icons.Filled.MoreVert,
-                    contentDescription = "Track options",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                DropdownMenuItem(
-                    text = { Text("Add to playlist") },
-                    onClick = {
-                        menuOpen = false
-                        onAddToPlaylist()
+                    imageVector = if (isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                    contentDescription = if (isLiked) {
+                        "Remove from Liked Songs"
+                    } else {
+                        "Add to Liked Songs"
+                    },
+                    tint = if (isLiked) {
+                        MaterialTheme.colorScheme.accentText
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
-                if (canDelete) {
-                    DropdownMenuItem(
-                        text = { Text("Delete download") },
-                        onClick = {
-                            menuOpen = false
-                            onDelete()
-                        },
+            }
+
+            // Deleting sits behind a menu rather than on the row: a bare delete icon beside every
+            // track is one mis-tap away from destroying music, which is not recoverable.
+            var menuOpen by remember { mutableStateOf(false) }
+
+            Box {
+                IconButton(onClick = { menuOpen = true }) {
+                    Icon(
+                        imageVector = Icons.Filled.MoreVert,
+                        contentDescription = "Track options",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Add to playlist") },
+                        onClick = {
+                            menuOpen = false
+                            onAddToPlaylist()
+                        },
+                    )
+                    if (canDelete) {
+                        DropdownMenuItem(
+                            text = { Text("Delete download") },
+                            onClick = {
+                                menuOpen = false
+                                onDelete()
+                            },
+                        )
+                    }
+                }
             }
-        }
-    }
+        },
+    )
 }
 
 private fun formatBytes(bytes: Long): String = when {

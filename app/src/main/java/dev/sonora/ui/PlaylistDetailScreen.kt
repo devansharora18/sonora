@@ -161,10 +161,19 @@ fun PlaylistDetailScreen(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 itemsIndexed(tracks, key = { _, track -> track.file.absolutePath }) { index, track ->
-                    PlaylistTrackRow(
+                    TrackListRow(
                         track = track,
-                        onPlay = { onPlayFrom(index) },
-                        onRemove = { onRemove(track) },
+                        meta = listOfNotNull(track.artist, track.album).joinToString("  \u00b7  "),
+                        onClick = { onPlayFrom(index) },
+                        trailing = {
+                            IconButton(onClick = { onRemove(track) }) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = "Remove from playlist",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        },
                     )
                 }
             }
@@ -187,62 +196,6 @@ fun PlaylistDetailScreen(
             onDismiss = { deleting = false },
             onConfirm = onDelete,
         )
-    }
-}
-
-@Composable
-private fun PlaylistTrackRow(track: LibraryTrack, onPlay: () -> Unit, onRemove: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onPlay)
-            .padding(start = 20.dp, top = 7.dp, bottom = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Tile {
-            val artwork = rememberArtwork(track.file)
-            if (artwork != null) {
-                Image(
-                    bitmap = artwork,
-                    contentDescription = "Album artwork",
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Filled.MusicNote,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(start = 14.dp),
-        ) {
-            Text(
-                text = track.title,
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = listOfNotNull(track.artist, track.album).joinToString("  \u00b7  "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-
-        IconButton(onClick = onRemove) {
-            Icon(
-                imageVector = Icons.Filled.Close,
-                contentDescription = "Remove from playlist",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
     }
 }
 

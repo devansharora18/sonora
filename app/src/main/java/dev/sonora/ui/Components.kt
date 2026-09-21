@@ -1,14 +1,20 @@
 package dev.sonora.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -25,7 +31,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.sonora.backend.LibraryTrack
+import dev.sonora.ui.theme.accentText
 
 /**
  * Small pieces shared by more than one screen.
@@ -46,6 +55,74 @@ internal fun Tile(content: @Composable () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         content()
+    }
+}
+
+/**
+ * The row shape every track list uses: artwork, title, one metadata line, then whichever actions
+ * that list offers.
+ *
+ * The metadata differs by list — the Library shows size, a playlist shows artist and album — so it
+ * is passed in rather than decided here.
+ */
+@Composable
+internal fun TrackListRow(
+    track: LibraryTrack,
+    meta: String,
+    onClick: () -> Unit,
+    isPlaying: Boolean = false,
+    trailing: @Composable RowScope.() -> Unit = {},
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Tile {
+            val artwork = rememberArtwork(track.file)
+            if (artwork != null) {
+                Image(
+                    bitmap = artwork,
+                    contentDescription = "Album artwork",
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Filled.MusicNote,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 14.dp),
+        ) {
+            Text(
+                text = track.title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (isPlaying) {
+                    MaterialTheme.colorScheme.accentText
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = meta,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        trailing()
     }
 }
 
