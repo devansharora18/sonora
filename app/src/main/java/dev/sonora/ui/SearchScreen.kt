@@ -1,6 +1,7 @@
 package dev.sonora.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -64,6 +65,12 @@ fun SearchScreen() {
     fun onSort(mode: SortMode) = SonoraBackend.setSort(mode)
 
     Column(modifier = Modifier.fillMaxSize()) {
+        Text(
+            text = "Search",
+            style = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 4.dp),
+        )
+
         SearchBar(
             query = query,
             onQueryChange = { query = it },
@@ -75,7 +82,7 @@ fun SearchScreen() {
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = 20.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 SortMode.entries.forEach { mode ->
@@ -84,12 +91,19 @@ fun SearchScreen() {
                         onClick = { onSort(mode) },
                         label = { Text(mode.label, style = MaterialTheme.typography.labelMedium) },
                         colors = FilterChipDefaults.filterChipColors(
-                            containerColor = Color.Transparent,
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
                             labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            selectedContainerColor = MaterialTheme.colorScheme.onSurface,
-                            selectedLabelColor = MaterialTheme.colorScheme.background,
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
                         ),
-                        border = null,
+                        border = BorderStroke(
+                            width = 1.dp,
+                            color = if (sort == mode) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.outline
+                            },
+                        ),
                     )
                 }
             }
@@ -140,12 +154,20 @@ private fun SearchBar(
         colors = TextFieldDefaults.colors(
             focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
             unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+            focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            focusedLeadingIconColor = MaterialTheme.colorScheme.primary,
+            unfocusedLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            focusedTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            unfocusedTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
             focusedIndicatorColor = Color.Transparent,
             unfocusedIndicatorColor = Color.Transparent,
         ),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 20.dp, vertical = 8.dp),
     )
 }
 
@@ -165,7 +187,7 @@ private fun ResultRow(hit: SearchHit, onDownload: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onDownload)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 20.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Remote files carry no artwork — the search response has no such field — so this is a
@@ -192,7 +214,7 @@ private fun ResultRow(hit: SearchHit, onDownload: () -> Unit) {
             Text(
                 text = hit.filename.substringAfterLast('\\'),
                 style = MaterialTheme.typography.bodyLarge,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
 
@@ -209,26 +231,36 @@ private fun ResultRow(hit: SearchHit, onDownload: () -> Unit) {
             )
 
             Text(
-                text = transfer(hit),
-                style = MaterialTheme.typography.labelSmall,
-                // Accent is reserved for the degraded case. A free slot is the norm, so marking
-                // it in colour would put the accent on every row and mean nothing.
-                color = if (hit.hasFreeUploadSlot) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.primary
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-
-            Text(
                 text = hit.filename.substringBeforeLast('\\', ""),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceFaint,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+
+        Column(
+            horizontalAlignment = Alignment.End,
+            modifier = Modifier.padding(end = 2.dp),
+        ) {
+            Text(
+                text = if (hit.hasFreeUploadSlot) "Ready" else "Queued ${hit.queueLength}",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (hit.hasFreeUploadSlot) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+                maxLines = 1,
+            )
+            hit.averageSpeed.takeIf { it > 0 }?.let {
+                Text(
+                    text = "${formatSize(it)}/s",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceFaint,
+                    maxLines = 1,
+                )
+            }
         }
 
         IconButton(onClick = onDownload) {
@@ -296,13 +328,3 @@ private fun quality(hit: SearchHit): String {
 
     return parts.joinToString(" ")
 }
-
-/**
- * The signals that decide how fast a transfer from this peer would be: whether it can start now,
- * how far back we would be queued, and how quickly it has uploaded before.
- */
-private fun transfer(hit: SearchHit): String = buildList {
-    add(if (hit.hasFreeUploadSlot) "slot free" else "no slot")
-    if (hit.queueLength > 0) add("queued ${hit.queueLength}")
-    hit.averageSpeed.takeIf { it > 0 }?.let { add("${formatSize(it)}/s") }
-}.joinToString("  \u00b7  ")
