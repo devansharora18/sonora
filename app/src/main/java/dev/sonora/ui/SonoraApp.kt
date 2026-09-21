@@ -61,6 +61,10 @@ fun SonoraApp() {
         is BackendState.Connected -> {
             var tab by remember { mutableStateOf(MainTab.Search) }
 
+            // Binds to the playback service once the app is in use, so the first tap on a track
+            // is not waiting on a connection.
+            LaunchedEffect(Unit) { SonoraPlayer.connect(context) }
+
             Column(modifier = Modifier.fillMaxSize()) {
                 Row(
                     modifier = Modifier
