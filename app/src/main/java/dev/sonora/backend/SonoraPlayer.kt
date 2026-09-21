@@ -63,7 +63,12 @@ object SonoraPlayer {
                 // Shuffle survives on the service across a UI restart, so the mirrored state is
                 // read back rather than assumed to start off.
                 controller?.let { active ->
-                    _state.update { it.copy(isShuffled = active.shuffleModeEnabled) }
+                    _state.update {
+                        it.copy(
+                            isShuffled = active.shuffleModeEnabled,
+                            repeatMode = repeatModeOf(active.repeatMode),
+                        )
+                    }
                 }
 
                 pendingQueue?.let { tracks ->
@@ -103,7 +108,17 @@ object SonoraPlayer {
     }
 
     fun next() {
-        controller?.seekToNextMediaItem()
+        val active = controller ?: return
+
+        // With repeat-one the queue is effectively this one track, so advancing would mean the
+        // mode only ever took effect at the end of the track. Restarting is what "loop this song"
+        // implies when the forward control is pressed.
+        if (active.repeatMode == Player.REPEAT_MODE_ONE) {
+            active.seekTo(0L)
+            return
+        }
+
+        active.seekToNextMediaItem()
     }
 
     /**
@@ -114,6 +129,22 @@ object SonoraPlayer {
     fun toggleShuffle() {
         val active = controller ?: return
         active.shuffleModeEnabled = !active.shuffleModeEnabled
+    }
+
+    /**
+     * Cycles off → loop queue → loop track.
+     *
+     * Repeat is a Media3 mode, so the player decides what happens at the end of the queue; this
+     * only picks the next mode. See [next] for how the forward control behaves while looping one
+     * track.
+     */
+    fun cycleRepeat() {
+        val active = controller ?: return
+        active.repeatMode = when (active.repeatMode) {
+            Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+            Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+            else -> Player.REPEAT_MODE_OFF
+        }
     }
 
     /** Keeps the Compose progress bar in step with the service without moving playback ownership. */
@@ -145,7 +176,15 @@ object SonoraPlayer {
             positionMs = active.currentPosition.coerceAtLeast(0L),
             durationMs = active.duration.takeIf { it > 0L } ?: 0L,
             isShuffled = active.shuffleModeEnabled,
+            repeatMode = repeatModeOf(active.repeatMode),
         )
+    }
+
+    /** Media3 reports the repeat mode as an int; this keeps that detail out of the state. */
+    private fun repeatModeOf(playerMode: Int): RepeatMode = when (playerMode) {
+        Player.REPEAT_MODE_ONE -> RepeatMode.One
+        Player.REPEAT_MODE_ALL -> RepeatMode.All
+        else -> RepeatMode.Off
     }
 
     private val listener = object : Player.Listener {
@@ -161,6 +200,10 @@ object SonoraPlayer {
 
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
             _state.update { it.copy(isShuffled = shuffleModeEnabled) }
+        }
+
+        override fun onRepeatModeChanged(repeatMode: Int) {
+            _state.update { it.copy(repeatMode = repeatModeOf(repeatMode)) }
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {

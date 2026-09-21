@@ -117,6 +117,7 @@ fun SonoraApp() {
                         playback.track?.let { SonoraBackend.toggleLiked(context, it) }
                     },
                     onToggleShuffle = { SonoraPlayer.toggleShuffle() },
+                    onCycleRepeat = { SonoraPlayer.cycleRepeat() },
                     onAddToPlaylist = { addTarget = playback.track },
                 )
             } else {

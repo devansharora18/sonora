@@ -22,6 +22,8 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Shuffle
@@ -40,6 +42,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.statusBarsPadding
+import dev.sonora.backend.RepeatMode
 import dev.sonora.backend.SonoraPlayer
 import dev.sonora.ui.theme.accentText
 
@@ -49,6 +52,7 @@ fun NowPlayingScreen(
     isLiked: Boolean,
     onToggleLike: () -> Unit,
     onToggleShuffle: () -> Unit,
+    onCycleRepeat: () -> Unit,
     onAddToPlaylist: () -> Unit,
 ) {
     val playback by SonoraPlayer.state.collectAsState()
@@ -236,6 +240,31 @@ fun NowPlayingScreen(
                         Icons.Filled.SkipNext,
                         contentDescription = "Next",
                         modifier = Modifier.size(32.dp),
+                    )
+                }
+                IconButton(
+                    onClick = onCycleRepeat,
+                    modifier = Modifier.size(64.dp),
+                ) {
+                    Icon(
+                        // Repeat One is the only mode with a distinct glyph; off and loop-queue
+                        // share one and are told apart by colour, as they are in Spotify.
+                        imageVector = if (playback.repeatMode == RepeatMode.One) {
+                            Icons.Filled.RepeatOne
+                        } else {
+                            Icons.Filled.Repeat
+                        },
+                        contentDescription = when (playback.repeatMode) {
+                            RepeatMode.Off -> "Turn repeat on"
+                            RepeatMode.All -> "Turn repeat-one on"
+                            RepeatMode.One -> "Turn repeat off"
+                        },
+                        tint = if (playback.repeatMode == RepeatMode.Off) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.accentText
+                        },
+                        modifier = Modifier.size(28.dp),
                     )
                 }
             }
