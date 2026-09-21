@@ -1,5 +1,6 @@
 package dev.sonora.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,11 +22,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sonora.backend.LibraryTrack
 import dev.sonora.backend.SonoraBackend
+import dev.sonora.backend.SonoraPlayer
 
 @Composable
 fun LibraryScreen() {
     val context = LocalContext.current
     val tracks by SonoraBackend.library.collectAsState()
+    val playback by SonoraPlayer.state.collectAsState()
 
     // The filesystem is the source of truth, so rescan whenever this screen is shown.
     LaunchedEffect(Unit) { SonoraBackend.refreshLibrary(context) }
@@ -48,7 +51,11 @@ fun LibraryScreen() {
 
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(tracks, key = { it.file.absolutePath }) { track ->
-                TrackRow(track)
+                TrackRow(
+                    track = track,
+                    isPlaying = playback.isPlaying && playback.track?.file == track.file,
+                    onPlay = { SonoraPlayer.play(context, track) },
+                )
                 HorizontalDivider()
             }
         }
@@ -56,10 +63,11 @@ fun LibraryScreen() {
 }
 
 @Composable
-private fun TrackRow(track: LibraryTrack) {
+private fun TrackRow(track: LibraryTrack, isPlaying: Boolean, onPlay: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onPlay)
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -67,6 +75,11 @@ private fun TrackRow(track: LibraryTrack) {
             Text(
                 text = track.title,
                 style = MaterialTheme.typography.bodyLarge,
+                color = if (isPlaying) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )

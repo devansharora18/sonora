@@ -5,6 +5,7 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,6 +16,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -31,9 +33,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sonora.backend.BackendState
 import dev.sonora.backend.SonoraBackend
+import dev.sonora.backend.SonoraPlayer
 
 /**
  * App root. Navigation and the feature graph hang off here.
@@ -81,10 +85,14 @@ fun SonoraApp() {
                     }
                 }
 
-                when (tab) {
-                    MainTab.Search -> SearchScreen()
-                    MainTab.Library -> LibraryScreen()
+                Box(modifier = Modifier.weight(1f)) {
+                    when (tab) {
+                        MainTab.Search -> SearchScreen()
+                        MainTab.Library -> LibraryScreen()
+                    }
                 }
+
+                NowPlayingBar()
             }
         }
 
@@ -95,6 +103,47 @@ fun SonoraApp() {
 private enum class MainTab(val label: String) {
     Search("Search"),
     Library("Library"),
+}
+
+/** Shown above the tabs whenever something is loaded, on either screen. */
+@Composable
+private fun NowPlayingBar() {
+    val playback by SonoraPlayer.state.collectAsState()
+    val track = playback.track ?: return
+
+    Surface(
+        tonalElevation = 3.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = track.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                track.artist?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
+            TextButton(onClick = { SonoraPlayer.togglePlayPause() }) {
+                Text(if (playback.isPlaying) "Pause" else "Play")
+            }
+        }
+    }
 }
 
 @Composable
