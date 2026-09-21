@@ -20,6 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -42,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import dev.sonora.backend.LibraryTrack
 import dev.sonora.backend.PlaybackState
 import dev.sonora.backend.Playlist
+import dev.sonora.backend.Playlists
 import dev.sonora.backend.SonoraBackend
 import dev.sonora.backend.SonoraPlayer
 import dev.sonora.ui.theme.accentText
@@ -71,6 +74,7 @@ fun LibraryScreen() {
     // Resolved once here: the library scan is what decides whether a stored path still exists, and
     // a playlist should report and play what is actually there.
     val byPath = remember(tracks) { tracks.associateBy { it.file.absolutePath } }
+    val likedPaths = remember(playlists) { Playlists.likedPaths(playlists) }
 
     // Held by id, not by value, so a rename or a removal is reflected immediately — and so a
     // deleted playlist closes the screen instead of showing a stale copy.
@@ -139,6 +143,8 @@ fun LibraryScreen() {
                     tracks = tracks,
                     playback = playback,
                     context = context,
+                    likedPaths = likedPaths,
+                    onToggleLike = { SonoraBackend.toggleLiked(context, it) },
                     onAddToPlaylist = { addTarget = it },
                 )
 
@@ -182,6 +188,8 @@ private fun TracksSection(
     tracks: List<LibraryTrack>,
     playback: PlaybackState,
     context: Context,
+    likedPaths: Set<String>,
+    onToggleLike: (LibraryTrack) -> Unit,
     onAddToPlaylist: (LibraryTrack) -> Unit,
 ) {
     if (tracks.isEmpty()) {
@@ -210,7 +218,9 @@ private fun TracksSection(
                 TrackRow(
                     track = track,
                     isPlaying = playback.isPlaying && playback.track?.file == track.file,
+                    isLiked = track.file.absolutePath in likedPaths,
                     onPlay = { SonoraPlayer.play(context, tracks, index) },
+                    onToggleLike = { onToggleLike(track) },
                     onAddToPlaylist = { onAddToPlaylist(track) },
                 )
             }
@@ -225,18 +235,12 @@ private fun PlaylistsSection(
     onCreate: () -> Unit,
     onOpen: (Playlist) -> Unit,
 ) {
-    if (playlists.isEmpty()) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            NewPlaylistRow(onCreate = onCreate)
-            EmptyState(
-                icon = Icons.AutoMirrored.Filled.QueueMusic,
-                title = "No playlists yet",
-                message = "Create one to keep tracks together.",
-                modifier = Modifier.weight(1f),
-            )
-        }
-        return
-    }
+    // Pinned first and shown even before anything is liked, so it is discoverable rather than
+    // appearing only after the user has already worked out how to like something.
+    val liked = playlists.firstOrNull { it.id == Playlists.LIKED_ID }
+        ?: Playlist(id = Playlists.LIKED_ID, name = Playlists.LIKED_NAME)
+    val others = playlists.filterNot { it.id == Playlists.LIKED_ID }
+    val all = listOf(liked) + others
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -245,10 +249,11 @@ private fun PlaylistsSection(
     ) {
         item { NewPlaylistRow(onCreate = onCreate) }
 
-        items(playlists, key = { it.id }) { playlist ->
+        items(all, key = { it.id }) { playlist ->
             PlaylistRow(
                 playlist = playlist,
                 trackCount = playlist.trackPaths.count { it in byPath },
+                reserved = playlist.id == Playlists.LIKED_ID,
                 onClick = { onOpen(playlist) },
             )
         }
@@ -281,7 +286,12 @@ private fun NewPlaylistRow(onCreate: () -> Unit) {
 }
 
 @Composable
-private fun PlaylistRow(playlist: Playlist, trackCount: Int, onClick: () -> Unit) {
+private fun PlaylistRow(
+    playlist: Playlist,
+    trackCount: Int,
+    reserved: Boolean,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -291,9 +301,17 @@ private fun PlaylistRow(playlist: Playlist, trackCount: Int, onClick: () -> Unit
     ) {
         Tile {
             Icon(
-                imageVector = Icons.AutoMirrored.Filled.QueueMusic,
+                imageVector = if (reserved) {
+                    Icons.Filled.Favorite
+                } else {
+                    Icons.AutoMirrored.Filled.QueueMusic
+                },
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (reserved) {
+                    MaterialTheme.colorScheme.accentText
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
             )
         }
 
@@ -323,7 +341,9 @@ private fun PlaylistRow(playlist: Playlist, trackCount: Int, onClick: () -> Unit
 private fun TrackRow(
     track: LibraryTrack,
     isPlaying: Boolean,
+    isLiked: Boolean,
     onPlay: () -> Unit,
+    onToggleLike: () -> Unit,
     onAddToPlaylist: () -> Unit,
 ) {
     Row(
@@ -374,6 +394,18 @@ private fun TrackRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        IconButton(onClick = onToggleLike) {
+            Icon(
+                imageVector = if (isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                contentDescription = if (isLiked) "Remove from Liked Songs" else "Add to Liked Songs",
+                tint = if (isLiked) {
+                    MaterialTheme.colorScheme.accentText
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
             )
         }
 

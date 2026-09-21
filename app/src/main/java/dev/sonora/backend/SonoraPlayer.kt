@@ -59,6 +59,13 @@ object SonoraPlayer {
                     .getOrNull()
 
                 controller?.addListener(listener)
+
+                // Shuffle survives on the service across a UI restart, so the mirrored state is
+                // read back rather than assumed to start off.
+                controller?.let { active ->
+                    _state.update { it.copy(isShuffled = active.shuffleModeEnabled) }
+                }
+
                 pendingQueue?.let { tracks ->
                     pendingQueue = null
                     controller?.let { playNow(it, tracks, pendingIndex) }
@@ -99,6 +106,16 @@ object SonoraPlayer {
         controller?.seekToNextMediaItem()
     }
 
+    /**
+     * Shuffle is delegated to the player rather than reordering our copy of the queue: Media3
+     * already shuffles traversal while keeping the current item, so reordering would duplicate
+     * that and lose the place of the track playing.
+     */
+    fun toggleShuffle() {
+        val active = controller ?: return
+        active.shuffleModeEnabled = !active.shuffleModeEnabled
+    }
+
     /** Keeps the Compose progress bar in step with the service without moving playback ownership. */
     fun syncPosition() {
         controller?.let { active ->
@@ -127,6 +144,7 @@ object SonoraPlayer {
             isPlaying = active.isPlaying,
             positionMs = active.currentPosition.coerceAtLeast(0L),
             durationMs = active.duration.takeIf { it > 0L } ?: 0L,
+            isShuffled = active.shuffleModeEnabled,
         )
     }
 
@@ -139,6 +157,10 @@ object SonoraPlayer {
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             controller?.let { updateTrack(it) }
+        }
+
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+            _state.update { it.copy(isShuffled = shuffleModeEnabled) }
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {

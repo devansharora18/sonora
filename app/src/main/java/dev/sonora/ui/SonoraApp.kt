@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import dev.sonora.ui.theme.accentText
 import dev.sonora.backend.BackendState
 import dev.sonora.backend.LibraryTrack
+import dev.sonora.backend.Playlists
 import dev.sonora.backend.SonoraBackend
 import dev.sonora.backend.SonoraPlayer
 import kotlinx.coroutines.delay
@@ -90,6 +91,7 @@ fun SonoraApp() {
             var addTarget by remember { mutableStateOf<LibraryTrack?>(null) }
             val playback by SonoraPlayer.state.collectAsState()
             val playlists by SonoraBackend.playlists.collectAsState()
+            val likedPaths = remember(playlists) { Playlists.likedPaths(playlists) }
 
             // Binds to the playback service once the app is in use, so the first tap on a track
             // is not waiting on a connection.
@@ -110,6 +112,11 @@ fun SonoraApp() {
                 BackHandler { playerOpen = false }
                 NowPlayingScreen(
                     onClose = { playerOpen = false },
+                    isLiked = playback.track?.let { it.file.absolutePath in likedPaths } == true,
+                    onToggleLike = {
+                        playback.track?.let { SonoraBackend.toggleLiked(context, it) }
+                    },
+                    onToggleShuffle = { SonoraPlayer.toggleShuffle() },
                     onAddToPlaylist = { addTarget = playback.track },
                 )
             } else {

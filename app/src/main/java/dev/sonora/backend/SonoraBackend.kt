@@ -147,6 +147,10 @@ object SonoraBackend {
         editPlaylists(context) { Playlists.removeTrack(it, id, path) }
     }
 
+    fun toggleLiked(context: Context, track: LibraryTrack) {
+        editPlaylists(context) { Playlists.toggleLiked(it, track.file.absolutePath) }
+    }
+
     /**
      * Applies an edit and persists it.
      *

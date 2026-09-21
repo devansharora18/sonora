@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
@@ -42,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sonora.backend.LibraryTrack
 import dev.sonora.backend.Playlist
+import dev.sonora.backend.Playlists
 
 /**
  * One playlist's contents.
@@ -64,6 +66,10 @@ fun PlaylistDetailScreen(
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
 
+    // Liked Songs is reserved: renaming or deleting it is refused by the backend anyway, so the
+    // menu that offers them is not shown at all.
+    val reserved = playlist.id == Playlists.LIKED_ID
+
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
@@ -76,25 +82,27 @@ fun PlaylistDetailScreen(
             }
             Spacer(modifier = Modifier.weight(1f))
 
-            Box {
-                IconButton(onClick = { menuOpen = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = "Playlist options")
-                }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Rename") },
-                        onClick = {
-                            menuOpen = false
-                            renaming = true
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Delete playlist") },
-                        onClick = {
-                            menuOpen = false
-                            deleting = true
-                        },
-                    )
+            if (!reserved) {
+                Box {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "Playlist options")
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Rename") },
+                            onClick = {
+                                menuOpen = false
+                                renaming = true
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete playlist") },
+                            onClick = {
+                                menuOpen = false
+                                deleting = true
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -133,9 +141,17 @@ fun PlaylistDetailScreen(
 
         if (tracks.isEmpty()) {
             EmptyState(
-                icon = Icons.AutoMirrored.Filled.QueueMusic,
-                title = "This playlist is empty",
-                message = "Add tracks to it from your library.",
+                icon = if (reserved) {
+                    Icons.Filled.FavoriteBorder
+                } else {
+                    Icons.AutoMirrored.Filled.QueueMusic
+                },
+                title = if (reserved) "No liked songs yet" else "This playlist is empty",
+                message = if (reserved) {
+                    "Tap the heart on a track to save it here."
+                } else {
+                    "Add tracks to it from your library."
+                },
                 modifier = Modifier.weight(1f),
             )
         } else {

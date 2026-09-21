@@ -84,4 +84,58 @@ class PlaylistsTest {
 
         assertEquals(playlists, Playlists.removeTrack(playlists, id = "a", path = "/missing.mp3"))
     }
+
+    @Test
+    fun `first like creates the liked list`() {
+        val result = Playlists.toggleLiked(listOf(first), path = "/one.mp3")
+
+        val liked = result.single { it.id == Playlists.LIKED_ID }
+        assertEquals(Playlists.LIKED_NAME, liked.name)
+        assertEquals(listOf("/one.mp3"), liked.trackPaths)
+    }
+
+    @Test
+    fun `liking again removes the like and leaves the list standing`() {
+        val liked = Playlist(Playlists.LIKED_ID, Playlists.LIKED_NAME, listOf("/one.mp3"))
+
+        val result = Playlists.toggleLiked(listOf(liked), path = "/one.mp3")
+
+        assertEquals(emptyList<String>(), result.single { it.id == Playlists.LIKED_ID }.trackPaths)
+    }
+
+    @Test
+    fun `toggling a like leaves the other playlists untouched`() {
+        val result = Playlists.toggleLiked(listOf(first, second), path = "/one.mp3")
+
+        assertEquals(first, result.single { it.id == "a" })
+        assertEquals(second, result.single { it.id == "b" })
+    }
+
+    @Test
+    fun `likedPaths is empty before anything is liked`() {
+        assertEquals(emptySet<String>(), Playlists.likedPaths(listOf(first, second)))
+    }
+
+    @Test
+    fun `likedPaths reports what has been liked`() {
+        val liked = Playlist(Playlists.LIKED_ID, Playlists.LIKED_NAME, listOf("/one.mp3"))
+
+        assertEquals(setOf("/one.mp3"), Playlists.likedPaths(listOf(first, liked)))
+    }
+
+    @Test
+    fun `liked songs cannot be renamed`() {
+        val liked = Playlist(Playlists.LIKED_ID, Playlists.LIKED_NAME, listOf("/one.mp3"))
+        val playlists = listOf(liked)
+
+        assertEquals(playlists, Playlists.rename(playlists, id = Playlists.LIKED_ID, name = "Mine"))
+    }
+
+    @Test
+    fun `liked songs cannot be deleted`() {
+        val liked = Playlist(Playlists.LIKED_ID, Playlists.LIKED_NAME, listOf("/one.mp3"))
+        val playlists = listOf(liked)
+
+        assertEquals(playlists, Playlists.delete(playlists, id = Playlists.LIKED_ID))
+    }
 }

@@ -17,11 +17,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -41,7 +44,13 @@ import dev.sonora.backend.SonoraPlayer
 import dev.sonora.ui.theme.accentText
 
 @Composable
-fun NowPlayingScreen(onClose: () -> Unit, onAddToPlaylist: () -> Unit) {
+fun NowPlayingScreen(
+    onClose: () -> Unit,
+    isLiked: Boolean,
+    onToggleLike: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+) {
     val playback by SonoraPlayer.state.collectAsState()
     val track = playback.track ?: return
     val progress = if (playback.durationMs > 0L) {
@@ -70,6 +79,21 @@ fun NowPlayingScreen(onClose: () -> Unit, onAddToPlaylist: () -> Unit) {
                 modifier = Modifier.weight(1f),
                 textAlign = TextAlign.Center,
             )
+            IconButton(onClick = onToggleLike) {
+                Icon(
+                    imageVector = if (isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                    contentDescription = if (isLiked) {
+                        "Remove from Liked Songs"
+                    } else {
+                        "Add to Liked Songs"
+                    },
+                    tint = if (isLiked) {
+                        MaterialTheme.colorScheme.accentText
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
             IconButton(onClick = onAddToPlaylist) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.PlaylistAdd,
@@ -160,6 +184,27 @@ fun NowPlayingScreen(onClose: () -> Unit, onAddToPlaylist: () -> Unit) {
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                IconButton(
+                    onClick = onToggleShuffle,
+                    modifier = Modifier.size(64.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Shuffle,
+                        contentDescription = if (playback.isShuffled) {
+                            "Turn shuffle off"
+                        } else {
+                            "Turn shuffle on"
+                        },
+                        // Active state is carried by colour, since a shuffle icon has no filled
+                        // counterpart to switch to.
+                        tint = if (playback.isShuffled) {
+                            MaterialTheme.colorScheme.accentText
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
                 IconButton(
                     onClick = { SonoraPlayer.previous() },
                     modifier = Modifier.size(64.dp),
