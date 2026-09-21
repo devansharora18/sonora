@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -27,14 +28,19 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,6 +52,7 @@ import dev.sonora.backend.RepeatMode
 import dev.sonora.backend.SonoraPlayer
 import dev.sonora.ui.theme.accentText
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NowPlayingScreen(
     onClose: () -> Unit,
@@ -57,8 +64,12 @@ fun NowPlayingScreen(
 ) {
     val playback by SonoraPlayer.state.collectAsState()
     val track = playback.track ?: return
-    val progress = if (playback.durationMs > 0L) {
-        (playback.positionMs.toFloat() / playback.durationMs).coerceIn(0f, 1f)
+    // Non-null only while a finger is down on the bar. Held locally so the polled position cannot
+    // drag the handle back out from under the drag.
+    var scrubbing by remember(track.file) { mutableStateOf<Float?>(null) }
+    val duration = playback.durationMs
+    val played = scrubbing ?: if (duration > 0L) {
+        (playback.positionMs.toFloat() / duration).coerceIn(0f, 1f)
     } else {
         0f
     }
@@ -164,20 +175,70 @@ fun NowPlayingScreen(
                     .fillMaxWidth()
                     .padding(top = 16.dp),
             ) {
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp),
-                    color = MaterialTheme.colorScheme.accentText,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                Slider(
+                    value = played,
+                    onValueChange = { scrubbing = it },
+                    onValueChangeFinished = {
+                        val target = scrubbing
+                        scrubbing = null
+                        if (target != null) {
+                            SonoraPlayer.seekTo((target.toDouble() * duration).toLong())
+                        }
+                    },
+                    // A track with no known duration cannot be seeked into.
+                    enabled = duration > 0L,
+                    // A dot rather than the Material default: the default thumb is a tall bar that
+                    // reads as a rendering glitch against a track this thin. Touch target is
+                    // unaffected — that comes from the slider's layout, not the thumb's size.
+                    // Supplied rather than defaulted: the Material track draws a stop dot at the
+                    // far end, which reads as a second handle on a track this thin.
+                    track = { sliderState ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(sliderState.value)
+                                    .fillMaxHeight()
+                                    .background(MaterialTheme.colorScheme.accentText),
+                            )
+                        }
+                    },
+                    thumb = {
+                        Box(
+                            modifier = Modifier
+                                .size(14.dp)
+                                .background(
+                                    color = MaterialTheme.colorScheme.accentText,
+                                    shape = CircleShape,
+                                ),
+                        )
+                    },
+                    colors = SliderDefaults.colors(
+                        thumbColor = MaterialTheme.colorScheme.accentText,
+                        activeTrackColor = MaterialTheme.colorScheme.accentText,
+                        inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text(formatMillis(playback.positionMs), style = MaterialTheme.typography.labelSmall)
-                    Text(formatMillis(playback.durationMs), style = MaterialTheme.typography.labelSmall)
+                    // Shows where the finger is, not where playback has got to, so the numbers and
+                    // the handle agree while scrubbing.
+                    Text(
+                        text = formatMillis((played.toDouble() * duration).toLong()),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                    Text(
+                        text = formatMillis(duration),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
                 }
             }
 

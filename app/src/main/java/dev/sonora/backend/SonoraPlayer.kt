@@ -132,6 +132,16 @@ object SonoraPlayer {
     }
 
     /**
+     * Jumps to a position in the track being played.
+     *
+     * Seeking only moves; it does not start playback, so scrubbing while paused leaves you paused
+     * at the point you chose.
+     */
+    fun seekTo(positionMs: Long) {
+        controller?.seekTo(positionMs.coerceAtLeast(0L))
+    }
+
+    /**
      * Cycles off → loop queue → loop track.
      *
      * Repeat is a Media3 mode, so the player decides what happens at the end of the queue; this
