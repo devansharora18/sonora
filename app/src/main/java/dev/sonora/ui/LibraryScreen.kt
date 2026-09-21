@@ -1,11 +1,13 @@
 package dev.sonora.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.HorizontalDivider
@@ -17,6 +19,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -71,7 +74,21 @@ private fun TrackRow(track: LibraryTrack, isPlaying: Boolean, onPlay: () -> Unit
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
+        rememberArtwork(track.file)?.let { artwork ->
+            Image(
+                bitmap = artwork,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(MaterialTheme.shapes.small),
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 12.dp),
+        ) {
             Text(
                 text = track.title,
                 style = MaterialTheme.typography.bodyLarge,
@@ -85,7 +102,8 @@ private fun TrackRow(track: LibraryTrack, isPlaying: Boolean, onPlay: () -> Unit
             )
 
             Text(
-                text = listOfNotNull(track.artist, formatBytes(track.size)).joinToString("  \u00b7  "),
+                text = listOfNotNull(track.artist, track.album, formatBytes(track.size))
+                    .joinToString("  \u00b7  "),
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

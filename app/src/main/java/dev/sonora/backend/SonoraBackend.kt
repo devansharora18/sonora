@@ -88,7 +88,7 @@ object SonoraBackend {
             _library.value = directory.listFiles()
                 ?.filter { it.isFile && it.extension.lowercase() in AUDIO_EXTENSIONS }
                 ?.sortedBy { it.name.lowercase() }
-                ?.map(LibraryTrack::from)
+                ?.map { LibraryTrack.from(it, TagReader.read(it)) }
                 .orEmpty()
         }
     }
