@@ -56,7 +56,10 @@ internal fun EmptyState(
     message: String,
     modifier: Modifier = Modifier.fillMaxSize(),
 ) {
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+    // fillMaxWidth() is not redundant with the default: callers pass weight(1f) to take the height
+    // below a header, and weight leaves the width unconstrained, which would let the block hug its
+    // content against the left edge instead of centring.
+    Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
