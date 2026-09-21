@@ -91,6 +91,10 @@ fun SonoraApp() {
             // is not waiting on a connection.
             LaunchedEffect(Unit) { SonoraPlayer.connect(context) }
 
+            // Playlists outlive the session, so they are read once when the app is usable rather
+            // than on every visit to the Library.
+            LaunchedEffect(Unit) { SonoraBackend.refreshPlaylists(context) }
+
             LaunchedEffect(playback.track, playback.isPlaying) {
                 while (playback.track != null) {
                     SonoraPlayer.syncPosition()
