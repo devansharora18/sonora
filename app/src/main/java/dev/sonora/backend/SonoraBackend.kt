@@ -91,14 +91,22 @@ object SonoraBackend {
         scope.launch {
             val directory = MusicDirectory.resolve(context).directory
 
-            val files = directory.listFiles()
-            Log.d(TAG, "library scan: ${directory.absolutePath} -> ${files?.size ?: -1} entry(s)")
-
-            _library.value = files
+            val downloaded = directory.listFiles()
                 ?.filter { it.isFile && it.extension.lowercase() in AUDIO_EXTENSIONS }
                 ?.sortedBy { it.name.lowercase() }
                 ?.map { LibraryTrack.from(it, TagReader.read(it)) }
                 .orEmpty()
+
+            // The folder scan comes first because a just-downloaded file is not in MediaStore yet:
+            // registering it with the media scanner is asynchronous. Everything else comes from the
+            // provider, which already has the tags and reaches the rest of the device.
+            val known = downloaded.mapTo(HashSet()) { it.file.absolutePath }
+            val rest = DeviceMusic.list(context).filter { it.file.absolutePath !in known }
+
+            val library = (downloaded + rest).sortedBy { it.title.lowercase() }
+            _library.value = library
+
+            Log.d(TAG, "library: ${library.size} track(s) (${downloaded.size} downloaded)")
         }
     }
 

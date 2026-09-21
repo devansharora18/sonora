@@ -47,6 +47,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sonora.backend.LibraryTrack
+import dev.sonora.backend.MusicDirectory
 import dev.sonora.backend.PlaybackState
 import dev.sonora.backend.Playlist
 import dev.sonora.backend.Playlists
@@ -82,6 +83,10 @@ fun LibraryScreen() {
     // a playlist should report and play what is actually there.
     val byPath = remember(tracks) { tracks.associateBy { it.file.absolutePath } }
     val likedPaths = remember(playlists) { Playlists.likedPaths(playlists) }
+
+    // Delete is only offered for files in the download folder. Now that the library also lists music
+    // from the rest of the device, offering to delete someone's own collection would be wrong.
+    val downloadDirectory = remember { MusicDirectory.resolve(context).directory.absolutePath }
 
     // Held by id, not by value, so a rename or a removal is reflected immediately — and so a
     // deleted playlist closes the screen instead of showing a stale copy.
@@ -151,6 +156,7 @@ fun LibraryScreen() {
                     playback = playback,
                     context = context,
                     likedPaths = likedPaths,
+                    downloadDirectory = downloadDirectory,
                     onToggleLike = { SonoraBackend.toggleLiked(context, it) },
                     onAddToPlaylist = { addTarget = it },
                     onDelete = { deleteTarget = it },
@@ -246,6 +252,7 @@ private fun TracksSection(
     playback: PlaybackState,
     context: Context,
     likedPaths: Set<String>,
+    downloadDirectory: String,
     onToggleLike: (LibraryTrack) -> Unit,
     onAddToPlaylist: (LibraryTrack) -> Unit,
     onDelete: (LibraryTrack) -> Unit,
@@ -253,15 +260,15 @@ private fun TracksSection(
     if (tracks.isEmpty()) {
         EmptyState(
             icon = Icons.Filled.MusicNote,
-            title = "Your library is empty",
-            message = "Search for music, then download a track to see it here.",
+            title = "No music found",
+            message = "Search for music and download a track, or add files to Music/Soulseek.",
         )
         return
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Text(
-            text = "${tracks.size} downloaded tracks",
+            text = if (tracks.size == 1) "1 track" else "${tracks.size} tracks",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 8.dp),
@@ -277,6 +284,7 @@ private fun TracksSection(
                     track = track,
                     isPlaying = playback.isPlaying && playback.track?.file == track.file,
                     isLiked = track.file.absolutePath in likedPaths,
+                    canDelete = track.file.parentFile?.absolutePath == downloadDirectory,
                     onPlay = { SonoraPlayer.play(context, tracks, index) },
                     onToggleLike = { onToggleLike(track) },
                     onAddToPlaylist = { onAddToPlaylist(track) },
@@ -401,6 +409,7 @@ private fun TrackRow(
     track: LibraryTrack,
     isPlaying: Boolean,
     isLiked: Boolean,
+    canDelete: Boolean,
     onPlay: () -> Unit,
     onToggleLike: () -> Unit,
     onAddToPlaylist: () -> Unit,
@@ -489,13 +498,15 @@ private fun TrackRow(
                         onAddToPlaylist()
                     },
                 )
-                DropdownMenuItem(
-                    text = { Text("Delete download") },
-                    onClick = {
-                        menuOpen = false
-                        onDelete()
-                    },
-                )
+                if (canDelete) {
+                    DropdownMenuItem(
+                        text = { Text("Delete download") },
+                        onClick = {
+                            menuOpen = false
+                            onDelete()
+                        },
+                    )
+                }
             }
         }
     }
