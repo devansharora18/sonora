@@ -70,6 +70,7 @@ fun LibraryScreen() {
     var openPlaylistId by remember { mutableStateOf<String?>(null) }
     var addTarget by remember { mutableStateOf<LibraryTrack?>(null) }
     var deleteTarget by remember { mutableStateOf<LibraryTrack?>(null) }
+    var failedDelete by remember { mutableStateOf<LibraryTrack?>(null) }
 
     // The filesystem is the source of truth, so rescan whenever this screen is shown.
     LaunchedEffect(Unit) {
@@ -205,7 +206,10 @@ fun LibraryScreen() {
                         if (track != null) {
                             // The queue would otherwise keep items whose files no longer exist.
                             if (playback.track?.file == track.file) SonoraPlayer.stop()
-                            SonoraBackend.deleteDownload(context, track)
+
+                            if (!SonoraBackend.deleteDownload(context, track)) {
+                                failedDelete = track
+                            }
                         }
                     },
                 ) {
@@ -214,6 +218,23 @@ fun LibraryScreen() {
             },
             dismissButton = {
                 TextButton(onClick = { deleteTarget = null }) { Text("Cancel") }
+            },
+        )
+    }
+
+    if (failedDelete != null) {
+        AlertDialog(
+            onDismissRequest = { failedDelete = null },
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            title = { Text("Couldn't delete") },
+            text = {
+                Text(
+                    "\u201c${failedDelete?.title}\u201d wasn't downloaded by Sonora, so Android " +
+                        "doesn't allow removing it from here. Use a file manager instead.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { failedDelete = null }) { Text("OK") }
             },
         )
     }

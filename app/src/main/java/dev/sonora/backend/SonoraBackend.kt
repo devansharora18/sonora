@@ -151,21 +151,27 @@ object SonoraBackend {
     }
 
     /**
-     * Deletes a downloaded file from the device.
+     * Deletes a downloaded file from the device, reporting whether it worked.
      *
      * Rescans rather than dropping it from the list in place, so the library stays a reflection of
      * what is actually on disk. Playlists and likes need no cleanup: they store paths and resolve
      * them against the library, so a deleted file simply stops appearing in them.
+     *
+     * The result matters because this legitimately fails for music the user added themselves: the
+     * app can read and play another app's media, but scoped storage will not let it delete it. The
+     * caller has to say so rather than leave a button that appears to work.
      */
-    fun deleteDownload(context: Context, track: LibraryTrack) {
+    fun deleteDownload(context: Context, track: LibraryTrack): Boolean {
         val file = track.file
-        runCatching { file.delete() }
+        val deleted = runCatching { file.delete() }.getOrDefault(false)
+        if (!deleted) return false
 
         // Nudges the media provider to drop its row for a file that is no longer there, instead of
         // leaving other players showing a track that cannot be opened.
         MediaScannerConnection.scanFile(context, arrayOf(file.absolutePath), null, null)
 
         refreshLibrary(context)
+        return true
     }
 
     fun toggleLiked(context: Context, track: LibraryTrack) {
