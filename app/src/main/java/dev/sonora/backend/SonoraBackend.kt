@@ -1,6 +1,7 @@
 package dev.sonora.backend
 
 import android.content.Context
+import android.media.MediaScannerConnection
 import android.util.Log
 import dev.sonora.protocol.DownloadOutcome
 import dev.sonora.protocol.SoulseekSession
@@ -51,7 +52,6 @@ object SonoraBackend {
     /** Anything that could act as a path separator, or that file systems dislike. */
     private val UNSAFE_FILENAME = Regex("[^A-Za-z0-9 ._()\\[\\]&'-]")
 
-    private const val DOWNLOAD_DIRECTORY = "downloads"
     private const val PLAYLISTS_FILE = "playlists.json"
     private const val MAX_FILENAME_LENGTH = 180
     private const val PROGRESS_POLL_MS = 400L
@@ -89,9 +89,12 @@ object SonoraBackend {
      */
     fun refreshLibrary(context: Context) {
         scope.launch {
-            val directory = File(context.filesDir, DOWNLOAD_DIRECTORY)
+            val directory = MusicDirectory.resolve(context).directory
 
-            _library.value = directory.listFiles()
+            val files = directory.listFiles()
+            Log.d(TAG, "library scan: ${directory.absolutePath} -> ${files?.size ?: -1} entry(s)")
+
+            _library.value = files
                 ?.filter { it.isFile && it.extension.lowercase() in AUDIO_EXTENSIONS }
                 ?.sortedBy { it.name.lowercase() }
                 ?.map { LibraryTrack.from(it, TagReader.read(it)) }
@@ -180,7 +183,7 @@ object SonoraBackend {
         val current = session ?: return
         if (_download.value is DownloadState.Downloading) return
 
-        val directory = File(context.filesDir, DOWNLOAD_DIRECTORY).apply { mkdirs() }
+        val directory = MusicDirectory.resolve(context).directory.apply { mkdirs() }
         val destination = destinationFor(directory, hit.filename)
         val name = destination.name
 
@@ -218,6 +221,9 @@ object SonoraBackend {
             }
 
             if (outcome is DownloadOutcome.Completed) {
+                // Shared storage is scanned by the media provider, not by us: without this the file
+                // exists but is invisible to every other player and to the system's own music apps.
+                MediaScannerConnection.scanFile(context, arrayOf(destination.absolutePath), null, null)
                 refreshLibrary(context)
             }
         }
@@ -368,6 +374,12 @@ object SonoraBackend {
 
         _state.value = BackendState.Connecting
         SonoraService.start(context)
+
+        // Bringing files across from private storage is a background chore, not something to make a
+        // download or a Library visit wait on. Nothing to do once the legacy folder is gone.
+        scope.launch {
+            if (MusicDirectory.migrate(context) > 0) refreshLibrary(context)
+        }
 
         scope.launch {
             val newSession = SoulseekSession(

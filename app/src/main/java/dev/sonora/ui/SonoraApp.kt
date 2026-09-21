@@ -78,9 +78,19 @@ fun SonoraApp() {
         ActivityResultContracts.RequestPermission(),
     ) { }
 
+    val storagePermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
+
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        // Below API 30 this is what lets downloads land in the shared Music folder. If it is
+        // refused, downloads fall back to app-private storage rather than failing.
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
+            storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
     }
 
