@@ -13,9 +13,9 @@ private val DarkScheme = darkColorScheme(
     primary = SonoraColors.Accent,
     onPrimary = SonoraColors.OnAccent,
     secondary = SonoraColors.OnSurfaceMuted,
-    onSecondary = SonoraColors.OnAccent,
+    onSecondary = SonoraColors.OnLight,
     tertiary = SonoraColors.OnSurfaceMuted,
-    onTertiary = SonoraColors.OnAccent,
+    onTertiary = SonoraColors.OnLight,
     background = SonoraColors.Background,
     onBackground = SonoraColors.OnBackground,
     surface = SonoraColors.Surface,
@@ -24,7 +24,8 @@ private val DarkScheme = darkColorScheme(
     onSurfaceVariant = SonoraColors.OnSurfaceMuted,
     outline = SonoraColors.Outline,
     error = SonoraColors.Error,
-    onError = SonoraColors.OnAccent,
+    // Dark, not dimmed mid-grey: the error red is a light tint, so white on it lands at 2.28:1.
+    onError = SonoraColors.OnLight,
 )
 
 val ColorScheme.onSurfaceFaint: Color
