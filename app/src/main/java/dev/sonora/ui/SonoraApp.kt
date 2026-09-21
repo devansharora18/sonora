@@ -13,17 +13,24 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.Image
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -82,24 +89,41 @@ fun SonoraApp() {
                     }
                 }
 
-                TabRow(selectedTabIndex = tab.ordinal, modifier = Modifier.fillMaxWidth()) {
-                    MainTab.entries.forEach { entry ->
-                        Tab(
-                            selected = tab == entry,
-                            onClick = { tab = entry },
-                            text = { Text(entry.label) },
-                        )
-                    }
-                }
-
                 Box(modifier = Modifier.weight(1f)) {
                     when (tab) {
+                        MainTab.Home -> HomeScreen()
                         MainTab.Search -> SearchScreen()
                         MainTab.Library -> LibraryScreen()
                     }
                 }
 
                 NowPlayingBar()
+
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    MainTab.entries.forEach { entry ->
+                        NavigationBarItem(
+                            selected = tab == entry,
+                            onClick = { tab = entry },
+                            icon = {
+                                Icon(
+                                    imageVector = entry.icon(),
+                                    contentDescription = null,
+                                )
+                            },
+                            label = { Text(entry.label) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = MaterialTheme.colorScheme.onSurface,
+                                selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                indicatorColor = MaterialTheme.colorScheme.surface,
+                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
+                        )
+                    }
+                }
             }
         }
 
@@ -108,8 +132,15 @@ fun SonoraApp() {
 }
 
 private enum class MainTab(val label: String) {
+    Home("Home"),
     Search("Search"),
     Library("Library"),
+}
+
+private fun MainTab.icon(): ImageVector = when (this) {
+    MainTab.Home -> Icons.Filled.Home
+    MainTab.Search -> Icons.Filled.Search
+    MainTab.Library -> Icons.AutoMirrored.Filled.List
 }
 
 /** Shown above the tabs whenever something is loaded, on either screen. */

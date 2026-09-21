@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Window theme only; all in-app styling comes from Compose (ui/theme). -->
-    <style name="Theme.Sonora" parent="android:Theme.Material.Light.NoActionBar" />
+    <!--
+        Window theme only; all in-app styling comes from Compose (ui/theme).
+        Dark, so the window background does not flash white before Compose draws.
+    -->
+    <style name="Theme.Sonora" parent="android:Theme.Material.NoActionBar" />
 </resources>
