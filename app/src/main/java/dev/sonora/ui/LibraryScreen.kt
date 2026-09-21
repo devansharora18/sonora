@@ -22,13 +22,18 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -64,6 +69,7 @@ fun LibraryScreen() {
     var creating by remember { mutableStateOf(false) }
     var openPlaylistId by remember { mutableStateOf<String?>(null) }
     var addTarget by remember { mutableStateOf<LibraryTrack?>(null) }
+    var deleteTarget by remember { mutableStateOf<LibraryTrack?>(null) }
 
     // The filesystem is the source of truth, so rescan whenever this screen is shown.
     LaunchedEffect(Unit) {
@@ -146,6 +152,7 @@ fun LibraryScreen() {
                     likedPaths = likedPaths,
                     onToggleLike = { SonoraBackend.toggleLiked(context, it) },
                     onAddToPlaylist = { addTarget = it },
+                    onDelete = { deleteTarget = it },
                 )
 
                 LibrarySection.Playlists -> PlaylistsSection(
@@ -181,6 +188,35 @@ fun LibraryScreen() {
             addTarget = null
         },
     )
+
+    if (deleteTarget != null) {
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            title = { Text("Delete download?") },
+            text = {
+                Text("\u201c${deleteTarget?.title}\u201d will be removed from this device.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val track = deleteTarget
+                        deleteTarget = null
+                        if (track != null) {
+                            // The queue would otherwise keep items whose files no longer exist.
+                            if (playback.track?.file == track.file) SonoraPlayer.stop()
+                            SonoraBackend.deleteDownload(context, track)
+                        }
+                    },
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("Cancel") }
+            },
+        )
+    }
 }
 
 @Composable
@@ -191,6 +227,7 @@ private fun TracksSection(
     likedPaths: Set<String>,
     onToggleLike: (LibraryTrack) -> Unit,
     onAddToPlaylist: (LibraryTrack) -> Unit,
+    onDelete: (LibraryTrack) -> Unit,
 ) {
     if (tracks.isEmpty()) {
         EmptyState(
@@ -222,6 +259,7 @@ private fun TracksSection(
                     onPlay = { SonoraPlayer.play(context, tracks, index) },
                     onToggleLike = { onToggleLike(track) },
                     onAddToPlaylist = { onAddToPlaylist(track) },
+                    onDelete = { onDelete(track) },
                 )
             }
         }
@@ -345,6 +383,7 @@ private fun TrackRow(
     onPlay: () -> Unit,
     onToggleLike: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -409,12 +448,34 @@ private fun TrackRow(
             )
         }
 
-        IconButton(onClick = onAddToPlaylist) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.PlaylistAdd,
-                contentDescription = "Add to playlist",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        // Deleting sits behind a menu rather than on the row: a bare delete icon beside every track
+        // is one mis-tap away from destroying music, which is not recoverable.
+        var menuOpen by remember { mutableStateOf(false) }
+
+        Box {
+            IconButton(onClick = { menuOpen = true }) {
+                Icon(
+                    imageVector = Icons.Filled.MoreVert,
+                    contentDescription = "Track options",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("Add to playlist") },
+                    onClick = {
+                        menuOpen = false
+                        onAddToPlaylist()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Delete download") },
+                    onClick = {
+                        menuOpen = false
+                        onDelete()
+                    },
+                )
+            }
         }
     }
 }

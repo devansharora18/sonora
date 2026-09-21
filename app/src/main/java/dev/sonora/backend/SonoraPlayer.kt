@@ -132,6 +132,22 @@ object SonoraPlayer {
     }
 
     /**
+     * Stops playback and clears the queue.
+     *
+     * Needed when the file being played is deleted underneath the player: the queue would otherwise
+     * hold items that can no longer be opened.
+     */
+    fun stop() {
+        val active = controller ?: return
+
+        active.stop()
+        active.clearMediaItems()
+        queue = emptyList()
+        pendingQueue = null
+        _state.value = PlaybackState()
+    }
+
+    /**
      * Jumps to a position in the track being played.
      *
      * Seeking only moves; it does not start playback, so scrubbing while paused leaves you paused
