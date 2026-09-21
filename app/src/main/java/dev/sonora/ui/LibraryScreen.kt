@@ -1,10 +1,10 @@
 package dev.sonora.ui
 
+import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,23 +13,18 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -39,10 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sonora.backend.LibraryTrack
@@ -65,6 +57,7 @@ fun LibraryScreen() {
     val playback by SonoraPlayer.state.collectAsState()
     var section by remember { mutableStateOf(LibrarySection.Tracks) }
     var creating by remember { mutableStateOf(false) }
+    var openPlaylistId by remember { mutableStateOf<String?>(null) }
 
     // The filesystem is the source of truth, so rescan whenever this screen is shown.
     LaunchedEffect(Unit) {
@@ -75,6 +68,31 @@ fun LibraryScreen() {
     // Resolved once here: the library scan is what decides whether a stored path still exists, and
     // a playlist should report and play what is actually there.
     val byPath = remember(tracks) { tracks.associateBy { it.file.absolutePath } }
+
+    // Held by id, not by value, so a rename or a removal is reflected immediately — and so a
+    // deleted playlist closes the screen instead of showing a stale copy.
+    val open = openPlaylistId?.let { id -> playlists.firstOrNull { it.id == id } }
+
+    if (open != null) {
+        val contents = open.trackPaths.mapNotNull { byPath[it] }
+
+        BackHandler { openPlaylistId = null }
+        PlaylistDetailScreen(
+            playlist = open,
+            tracks = contents,
+            onBack = { openPlaylistId = null },
+            onPlayFrom = { index -> SonoraPlayer.play(context, contents, index) },
+            onRemove = { track ->
+                SonoraBackend.removeFromPlaylist(context, open.id, track.file.absolutePath)
+            },
+            onRename = { name -> SonoraBackend.renamePlaylist(context, open.id, name) },
+            onDelete = {
+                SonoraBackend.deletePlaylist(context, open.id)
+                openPlaylistId = null
+            },
+        )
+        return
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Text(
@@ -120,19 +138,19 @@ fun LibraryScreen() {
                     playlists = playlists,
                     byPath = byPath,
                     onCreate = { creating = true },
-                    onPlay = { playlist ->
-                        val playable = playlist.trackPaths.mapNotNull { byPath[it] }
-                        if (playable.isNotEmpty()) SonoraPlayer.play(context, playable, 0)
-                    },
+                    onOpen = { openPlaylistId = it.id },
                 )
             }
         }
     }
 
     if (creating) {
-        CreatePlaylistDialog(
+        NameDialog(
+            title = "New playlist",
+            initialName = "",
+            confirmLabel = "Create",
             onDismiss = { creating = false },
-            onCreate = { SonoraBackend.createPlaylist(context, it) },
+            onConfirm = { SonoraBackend.createPlaylist(context, it) },
         )
     }
 }
@@ -181,7 +199,7 @@ private fun PlaylistsSection(
     playlists: List<Playlist>,
     byPath: Map<String, LibraryTrack>,
     onCreate: () -> Unit,
-    onPlay: (Playlist) -> Unit,
+    onOpen: (Playlist) -> Unit,
 ) {
     if (playlists.isEmpty()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -207,7 +225,7 @@ private fun PlaylistsSection(
             PlaylistRow(
                 playlist = playlist,
                 trackCount = playlist.trackPaths.count { it in byPath },
-                onClick = { onPlay(playlist) },
+                onClick = { onOpen(playlist) },
             )
         }
     }
@@ -222,7 +240,13 @@ private fun NewPlaylistRow(onCreate: () -> Unit) {
             .padding(horizontal = 20.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Tile { Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.accentText) }
+        Tile {
+            Icon(
+                imageVector = Icons.Filled.Add,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.accentText,
+            )
+        }
         Text(
             text = "New playlist",
             style = MaterialTheme.typography.bodyLarge,
@@ -324,85 +348,6 @@ private fun TrackRow(track: LibraryTrack, isPlaying: Boolean, onPlay: () -> Unit
             )
         }
     }
-}
-
-/** The 56dp leading square shared by track and playlist rows, so the two lists line up. */
-@Composable
-private fun Tile(content: @Composable () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(56.dp)
-            .clip(RoundedCornerShape(4.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant),
-        contentAlignment = Alignment.Center,
-    ) {
-        content()
-    }
-}
-
-@Composable
-private fun EmptyState(
-    icon: ImageVector,
-    title: String,
-    message: String,
-    modifier: Modifier = Modifier.fillMaxSize(),
-) {
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(horizontal = 32.dp),
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(text = title, style = MaterialTheme.typography.titleMedium)
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-        }
-    }
-}
-
-@Composable
-private fun CreatePlaylistDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
-    var name by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        // The scheme does not define the surface-container roles, so without this the dialog falls
-        // back to the Material baseline palette and reads as off-brand purple.
-        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        title = { Text("New playlist") },
-        text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = { Text("Name") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        },
-        confirmButton = {
-            TextButton(
-                enabled = name.isNotBlank(),
-                onClick = {
-                    onCreate(name)
-                    onDismiss()
-                },
-            ) {
-                Text("Create")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
 }
 
 private fun formatBytes(bytes: Long): String = when {
