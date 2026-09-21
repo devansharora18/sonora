@@ -7,6 +7,7 @@ import dev.sonora.protocol.SoulseekSession
 import dev.sonora.protocol.server.LoginResponse
 import dev.sonora.service.SonoraService
 import java.io.File
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -51,6 +52,7 @@ object SonoraBackend {
     private val UNSAFE_FILENAME = Regex("[^A-Za-z0-9 ._()\\[\\]&'-]")
 
     private const val DOWNLOAD_DIRECTORY = "downloads"
+    private const val PLAYLISTS_FILE = "playlists.json"
     private const val MAX_FILENAME_LENGTH = 180
     private const val PROGRESS_POLL_MS = 400L
 
@@ -74,6 +76,10 @@ object SonoraBackend {
 
     val library: StateFlow<List<LibraryTrack>> = _library.asStateFlow()
 
+    private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
+
+    val playlists: StateFlow<List<Playlist>> = _playlists.asStateFlow()
+
     /**
      * Rescans the download directory.
      *
@@ -92,6 +98,55 @@ object SonoraBackend {
                 .orEmpty()
         }
     }
+
+    /**
+     * Reads playlists back from disk.
+     *
+     * Called when the UI needs them rather than at construction, so the backend does not require a
+     * Context to exist.
+     */
+    fun refreshPlaylists(context: Context) {
+        scope.launch { _playlists.value = store(context).load() }
+    }
+
+    fun createPlaylist(context: Context, name: String) {
+        editPlaylists(context) { Playlists.create(it, name, UUID.randomUUID().toString()) }
+    }
+
+    fun renamePlaylist(context: Context, id: String, name: String) {
+        editPlaylists(context) { Playlists.rename(it, id, name) }
+    }
+
+    fun deletePlaylist(context: Context, id: String) {
+        editPlaylists(context) { Playlists.delete(it, id) }
+    }
+
+    fun addToPlaylist(context: Context, id: String, track: LibraryTrack) {
+        editPlaylists(context) { Playlists.addTrack(it, id, track.file.absolutePath) }
+    }
+
+    fun removeFromPlaylist(context: Context, id: String, path: String) {
+        editPlaylists(context) { Playlists.removeTrack(it, id, path) }
+    }
+
+    /**
+     * Applies an edit and persists it.
+     *
+     * Disk first, then state: publishing before the write succeeds would leave the UI showing a
+     * playlist that is not actually saved. A no-op edit is dropped here so a rejected name does
+     * not cause a pointless write.
+     */
+    private fun editPlaylists(context: Context, edit: (List<Playlist>) -> List<Playlist>) {
+        scope.launch {
+            val updated = edit(_playlists.value)
+            if (updated == _playlists.value) return@launch
+
+            store(context).save(updated)
+            _playlists.value = updated
+        }
+    }
+
+    private fun store(context: Context) = PlaylistStore(File(context.filesDir, PLAYLISTS_FILE))
 
     /**
      * Downloads one search result into app-private storage.
