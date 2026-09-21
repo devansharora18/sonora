@@ -4,4 +4,6 @@ package dev.sonora.backend
 data class PlaybackState(
     val track: LibraryTrack? = null,
     val isPlaying: Boolean = false,
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L,
 )

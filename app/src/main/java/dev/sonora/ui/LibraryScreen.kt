@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.MaterialTheme
@@ -92,11 +93,11 @@ fun LibraryScreen() {
             contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            items(tracks, key = { it.file.absolutePath }) { track ->
+            itemsIndexed(tracks, key = { _, track -> track.file.absolutePath }) { index, track ->
                 TrackRow(
                     track = track,
                     isPlaying = playback.isPlaying && playback.track?.file == track.file,
-                    onPlay = { SonoraPlayer.play(context, track) },
+                    onPlay = { SonoraPlayer.play(context, tracks, index) },
                 )
             }
         }

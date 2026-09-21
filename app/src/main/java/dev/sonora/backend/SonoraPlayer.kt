@@ -35,10 +35,11 @@ object SonoraPlayer {
     private var connecting = false
 
     /** Set when playback is requested before the controller has finished connecting. */
-    private var pending: LibraryTrack? = null
+    private var pendingQueue: List<LibraryTrack>? = null
+    private var pendingIndex = 0
 
-    /** The track being played. Held here because the service exposes only a media item. */
-    private var current: LibraryTrack? = null
+    /** Mirrors the local queue because the service exposes media items, not LibraryTrack values. */
+    private var queue: List<LibraryTrack> = emptyList()
 
     /** Starts connecting to the playback service. Safe to call repeatedly. */
     fun connect(context: Context) {
@@ -58,9 +59,9 @@ object SonoraPlayer {
                     .getOrNull()
 
                 controller?.addListener(listener)
-                pending?.let { track ->
-                    pending = null
-                    controller?.let { playNow(it, track) }
+                pendingQueue?.let { tracks ->
+                    pendingQueue = null
+                    controller?.let { playNow(it, tracks, pendingIndex) }
                 }
             },
             ContextCompat.getMainExecutor(appContext),
@@ -68,12 +69,20 @@ object SonoraPlayer {
     }
 
     fun play(context: Context, track: LibraryTrack) {
+        play(context, listOf(track), 0)
+    }
+
+    fun play(context: Context, tracks: List<LibraryTrack>, startIndex: Int) {
+        if (tracks.isEmpty()) return
+
+        val safeIndex = startIndex.coerceIn(0, tracks.lastIndex)
         val active = controller
         if (active == null) {
-            pending = track
+            pendingQueue = tracks
+            pendingIndex = safeIndex
             connect(context)
         } else {
-            playNow(active, track)
+            playNow(active, tracks, safeIndex)
         }
     }
 
@@ -82,12 +91,43 @@ object SonoraPlayer {
         if (active.isPlaying) active.pause() else active.play()
     }
 
-    private fun playNow(active: MediaController, track: LibraryTrack) {
-        current = track
-        active.setMediaItem(MediaItem.fromUri(Uri.fromFile(track.file)))
+    fun previous() {
+        controller?.seekToPreviousMediaItem()
+    }
+
+    fun next() {
+        controller?.seekToNextMediaItem()
+    }
+
+    /** Keeps the Compose progress bar in step with the service without moving playback ownership. */
+    fun syncPosition() {
+        controller?.let { active ->
+            _state.update {
+                it.copy(
+                    positionMs = active.currentPosition.coerceAtLeast(0L),
+                    durationMs = active.duration.takeIf { duration -> duration > 0L } ?: 0L,
+                )
+            }
+        }
+    }
+
+    private fun playNow(active: MediaController, tracks: List<LibraryTrack>, startIndex: Int) {
+        queue = tracks
+        val mediaItems = tracks.map { MediaItem.fromUri(Uri.fromFile(it.file)) }
+        active.setMediaItems(mediaItems, startIndex, 0L)
         active.prepare()
         active.play()
-        _state.value = PlaybackState(track = track, isPlaying = true)
+        updateTrack(active, startIndex)
+    }
+
+    private fun updateTrack(active: MediaController, index: Int = active.currentMediaItemIndex) {
+        val track = queue.getOrNull(index) ?: return
+        _state.value = PlaybackState(
+            track = track,
+            isPlaying = active.isPlaying,
+            positionMs = active.currentPosition.coerceAtLeast(0L),
+            durationMs = active.duration.takeIf { it > 0L } ?: 0L,
+        )
     }
 
     private val listener = object : Player.Listener {
@@ -95,6 +135,10 @@ object SonoraPlayer {
             // Pause/play from the notification arrives here too, so the UI stays in step with
             // controls the app never saw.
             _state.update { it.copy(isPlaying = isPlaying) }
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            controller?.let { updateTrack(it) }
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
