@@ -10,6 +10,7 @@ composeBom = "2026.09.00"
 coreKtx = "1.19.0"
 activityCompose = "1.13.0"
 media3 = "1.11.1"
+kotlinxSerialization = "1.9.0"
 junit = "4.13.2"
 
 [libraries]
@@ -22,8 +23,10 @@ androidx-compose-icons-extended = { module = "androidx.compose.material:material
 androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
 androidx-media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "media3" }
 androidx-media3-session = { module = "androidx.media3:media3-session", version.ref = "media3" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 junit = { module = "junit:junit", version.ref = "junit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
