@@ -34,7 +34,9 @@ fun rememberArtwork(file: File): ImageBitmap? {
         if (artworkCache.containsKey(file.absolutePath)) return@LaunchedEffect
 
         val loaded = withContext(Dispatchers.IO) { decodeArtwork(file) }
-        artworkCache[file.absolutePath] = loaded
+        if (loaded != null) {
+            artworkCache[file.absolutePath] = loaded
+        }
         artwork = loaded
     }
 
