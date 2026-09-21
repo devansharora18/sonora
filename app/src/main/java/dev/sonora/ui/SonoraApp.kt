@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -84,7 +85,12 @@ fun SonoraApp() {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text("Sonora", style = MaterialTheme.typography.titleMedium)
-                    TextButton(onClick = { SonoraBackend.disconnect(context) }) {
+                    TextButton(
+                        onClick = { SonoraBackend.disconnect(context) },
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                    ) {
                         Text("Disconnect")
                     }
                 }

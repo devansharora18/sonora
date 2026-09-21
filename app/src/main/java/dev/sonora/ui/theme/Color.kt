@@ -27,6 +27,14 @@ internal object SonoraColors {
     /** Secondary text: artist names, counts, durations. */
     val OnSurfaceMuted = Color(0xFFAAAAAA)
 
+    /**
+     * Tertiary text: the least important line in a row.
+     *
+     * A separate token rather than reusing [Outline] — that one is for borders, and at #303030 it
+     * is unreadable as text on this background (about 1.4:1, against a 4.5:1 minimum).
+     */
+    val OnSurfaceFaint = Color(0xFF7A7A7A)
+
     val Outline = Color(0xFF303030)
 
     val Accent = Color(0xFFFF0033)
