@@ -74,24 +74,29 @@ fun SonoraApp() {
     val context = LocalContext.current
     val state by SonoraBackend.state.collectAsState()
 
-    val notificationPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { }
-
-    val storagePermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
+    // One launcher for all of them: Android shows these one dialog at a time, so firing separate
+    // requests in the same frame would silently drop all but the first.
+    val permissions = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
     ) { }
 
     LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        val wanted = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+                add(Manifest.permission.READ_MEDIA_AUDIO)
+            } else {
+                add(Manifest.permission.READ_EXTERNAL_STORAGE)
+
+                // Below API 30 this is also what lets downloads land in the shared Music folder.
+                // Refused, downloads fall back to app-private storage rather than failing.
+                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
+                    add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                }
+            }
         }
 
-        // Below API 30 this is what lets downloads land in the shared Music folder. If it is
-        // refused, downloads fall back to app-private storage rather than failing.
-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
-            storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-        }
+        permissions.launch(wanted.toTypedArray())
     }
 
     when (val current = state) {

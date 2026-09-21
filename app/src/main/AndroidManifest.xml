@@ -15,6 +15,16 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
 
+    <!--
+        Reading music the user put in the shared folder themselves. An app can always read media it
+        contributed, but not media it did not create, so without these the library only ever sees
+        its own downloads.
+    -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
     <application
         android:label="@string/app_name"
         android:requestLegacyExternalStorage="true"
