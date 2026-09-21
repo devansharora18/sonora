@@ -109,8 +109,26 @@ object SonoraBackend {
         scope.launch { _playlists.value = store(context).load() }
     }
 
-    fun createPlaylist(context: Context, name: String) {
-        editPlaylists(context) { Playlists.create(it, name, UUID.randomUUID().toString()) }
+    /**
+     * Creates a playlist, optionally with a first track already in it.
+     *
+     * The track is added in the same edit because the id is generated here: creating and then
+     * adding would be two writes with a window where the playlist exists but is empty, and a
+     * failure between them would leave it that way.
+     */
+    fun createPlaylist(context: Context, name: String, firstTrack: LibraryTrack? = null) {
+        val id = UUID.randomUUID().toString()
+
+        editPlaylists(context) { current ->
+            val created = Playlists.create(current, name, id)
+
+            // A blank name leaves `created` unchanged, so the add finds no such id and is a no-op.
+            if (firstTrack == null) {
+                created
+            } else {
+                Playlists.addTrack(created, id, firstTrack.file.absolutePath)
+            }
+        }
     }
 
     fun renamePlaylist(context: Context, id: String, name: String) {

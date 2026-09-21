@@ -60,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sonora.ui.theme.accentText
 import dev.sonora.backend.BackendState
+import dev.sonora.backend.LibraryTrack
 import dev.sonora.backend.SonoraBackend
 import dev.sonora.backend.SonoraPlayer
 import kotlinx.coroutines.delay
@@ -86,7 +87,9 @@ fun SonoraApp() {
         is BackendState.Connected -> {
             var tab by remember { mutableStateOf(MainTab.Search) }
             var playerOpen by remember { mutableStateOf(false) }
+            var addTarget by remember { mutableStateOf<LibraryTrack?>(null) }
             val playback by SonoraPlayer.state.collectAsState()
+            val playlists by SonoraBackend.playlists.collectAsState()
 
             // Binds to the playback service once the app is in use, so the first tap on a track
             // is not waiting on a connection.
@@ -105,7 +108,10 @@ fun SonoraApp() {
 
             if (playerOpen) {
                 BackHandler { playerOpen = false }
-                NowPlayingScreen(onClose = { playerOpen = false })
+                NowPlayingScreen(
+                    onClose = { playerOpen = false },
+                    onAddToPlaylist = { addTarget = playback.track },
+                )
             } else {
                 Column(modifier = Modifier.fillMaxSize()) {
                 Row(
@@ -163,6 +169,20 @@ fun SonoraApp() {
                 }
                 }
             }
+
+            AddToPlaylistFlow(
+                track = addTarget,
+                playlists = playlists,
+                onDismiss = { addTarget = null },
+                onAdd = { playlist, track ->
+                    SonoraBackend.addToPlaylist(context, playlist.id, track)
+                    addTarget = null
+                },
+                onCreateWithTrack = { name, track ->
+                    SonoraBackend.createPlaylist(context, name, track)
+                    addTarget = null
+                },
+            )
         }
 
         else -> ConnectScreen(state = current)

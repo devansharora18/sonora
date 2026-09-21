@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
@@ -40,7 +41,7 @@ import dev.sonora.backend.SonoraPlayer
 import dev.sonora.ui.theme.accentText
 
 @Composable
-fun NowPlayingScreen(onClose: () -> Unit) {
+fun NowPlayingScreen(onClose: () -> Unit, onAddToPlaylist: () -> Unit) {
     val playback by SonoraPlayer.state.collectAsState()
     val track = playback.track ?: return
     val progress = if (playback.durationMs > 0L) {
@@ -69,7 +70,13 @@ fun NowPlayingScreen(onClose: () -> Unit) {
                 modifier = Modifier.weight(1f),
                 textAlign = TextAlign.Center,
             )
-            Box(modifier = Modifier.size(48.dp))
+            IconButton(onClick = onAddToPlaylist) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.PlaylistAdd,
+                    contentDescription = "Add to playlist",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         Column(

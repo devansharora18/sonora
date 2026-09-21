@@ -17,12 +17,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -58,6 +60,7 @@ fun LibraryScreen() {
     var section by remember { mutableStateOf(LibrarySection.Tracks) }
     var creating by remember { mutableStateOf(false) }
     var openPlaylistId by remember { mutableStateOf<String?>(null) }
+    var addTarget by remember { mutableStateOf<LibraryTrack?>(null) }
 
     // The filesystem is the source of truth, so rescan whenever this screen is shown.
     LaunchedEffect(Unit) {
@@ -132,7 +135,12 @@ fun LibraryScreen() {
 
         Box(modifier = Modifier.weight(1f)) {
             when (section) {
-                LibrarySection.Tracks -> TracksSection(tracks, playback, context)
+                LibrarySection.Tracks -> TracksSection(
+                    tracks = tracks,
+                    playback = playback,
+                    context = context,
+                    onAddToPlaylist = { addTarget = it },
+                )
 
                 LibrarySection.Playlists -> PlaylistsSection(
                     playlists = playlists,
@@ -153,6 +161,20 @@ fun LibraryScreen() {
             onConfirm = { SonoraBackend.createPlaylist(context, it) },
         )
     }
+
+    AddToPlaylistFlow(
+        track = addTarget,
+        playlists = playlists,
+        onDismiss = { addTarget = null },
+        onAdd = { playlist, track ->
+            SonoraBackend.addToPlaylist(context, playlist.id, track)
+            addTarget = null
+        },
+        onCreateWithTrack = { name, track ->
+            SonoraBackend.createPlaylist(context, name, track)
+            addTarget = null
+        },
+    )
 }
 
 @Composable
@@ -160,6 +182,7 @@ private fun TracksSection(
     tracks: List<LibraryTrack>,
     playback: PlaybackState,
     context: Context,
+    onAddToPlaylist: (LibraryTrack) -> Unit,
 ) {
     if (tracks.isEmpty()) {
         EmptyState(
@@ -188,6 +211,7 @@ private fun TracksSection(
                     track = track,
                     isPlaying = playback.isPlaying && playback.track?.file == track.file,
                     onPlay = { SonoraPlayer.play(context, tracks, index) },
+                    onAddToPlaylist = { onAddToPlaylist(track) },
                 )
             }
         }
@@ -296,7 +320,12 @@ private fun PlaylistRow(playlist: Playlist, trackCount: Int, onClick: () -> Unit
 }
 
 @Composable
-private fun TrackRow(track: LibraryTrack, isPlaying: Boolean, onPlay: () -> Unit) {
+private fun TrackRow(
+    track: LibraryTrack,
+    isPlaying: Boolean,
+    onPlay: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -345,6 +374,14 @@ private fun TrackRow(track: LibraryTrack, isPlaying: Boolean, onPlay: () -> Unit
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        IconButton(onClick = onAddToPlaylist) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.PlaylistAdd,
+                contentDescription = "Add to playlist",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
