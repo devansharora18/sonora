@@ -14,7 +14,22 @@ internal object SonoraColors {
     val OnSurfaceFaint = Color(0xFF8A8A8A)
     val Outline = Color(0xFF535353)
 
+    /**
+     * Accent for filled surfaces — a button, a selected chip — where content sits on top of it.
+     *
+     * Deeper than [AccentText] because white has to stay readable on it: white reaches 4.77:1
+     * here, and only 3.96:1 on the brighter red.
+     */
     val Accent = Color(0xFFE6002E)
+
+    /**
+     * Accent for text, icons and bars drawn on a dark background.
+     *
+     * Brighter than [Accent] because the contrast requirement runs the other way: this red reaches
+     * 5.30:1 on black, where the deeper one manages only 4.40:1. One red cannot be best at both,
+     * which is why these are separate tokens.
+     */
+    val AccentText = Color(0xFFFF0033)
 
     /**
      * Content on the accent surface.

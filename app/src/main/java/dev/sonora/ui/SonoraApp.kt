@@ -58,6 +58,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.sonora.ui.theme.accentText
 import dev.sonora.backend.BackendState
 import dev.sonora.backend.SonoraBackend
 import dev.sonora.backend.SonoraPlayer
@@ -151,8 +152,8 @@ fun SonoraApp() {
                             },
                             label = { Text(entry.label) },
                             colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.primary,
-                                selectedTextColor = MaterialTheme.colorScheme.primary,
+                                selectedIconColor = MaterialTheme.colorScheme.accentText,
+                                selectedTextColor = MaterialTheme.colorScheme.accentText,
                                 indicatorColor = MaterialTheme.colorScheme.background,
                                 unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                 unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -257,7 +258,7 @@ private fun NowPlayingBar(onOpen: () -> Unit) {
                     Icon(
                         imageVector = if (playback.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                         contentDescription = if (playback.isPlaying) "Pause" else "Play",
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = MaterialTheme.colorScheme.accentText,
                     )
                 }
                 IconButton(
@@ -278,7 +279,7 @@ private fun NowPlayingBar(onOpen: () -> Unit) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(2.dp),
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.accentText,
                 trackColor = MaterialTheme.colorScheme.surfaceVariant,
             )
             }

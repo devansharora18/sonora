@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.statusBarsPadding
 import dev.sonora.backend.SonoraPlayer
+import dev.sonora.ui.theme.accentText
 
 @Composable
 fun NowPlayingScreen(onClose: () -> Unit) {
@@ -133,7 +134,7 @@ fun NowPlayingScreen(onClose: () -> Unit) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(4.dp),
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.accentText,
                     trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 )
                 Row(

@@ -31,6 +31,16 @@ private val DarkScheme = darkColorScheme(
 val ColorScheme.onSurfaceFaint: Color
     get() = SonoraColors.OnSurfaceFaint
 
+/**
+ * Accent for text, icons and bars drawn on a dark background.
+ *
+ * Material assumes one `primary` can serve both as a filled surface and as accent ink, and those
+ * pull in opposite directions: a red bright enough to read on black is too light to carry white
+ * text, and vice versa. `primary` stays the surface colour; this is the ink.
+ */
+val ColorScheme.accentText: Color
+    get() = SonoraColors.AccentText
+
 @Composable
 fun SonoraTheme(
     content: @Composable () -> Unit,

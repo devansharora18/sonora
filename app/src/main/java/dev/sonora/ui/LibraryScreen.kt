@@ -50,6 +50,7 @@ import dev.sonora.backend.PlaybackState
 import dev.sonora.backend.Playlist
 import dev.sonora.backend.SonoraBackend
 import dev.sonora.backend.SonoraPlayer
+import dev.sonora.ui.theme.accentText
 
 private enum class LibrarySection(val label: String) {
     Tracks("Tracks"),
@@ -102,7 +103,7 @@ fun LibraryScreen() {
                     border = BorderStroke(
                         width = 1.dp,
                         color = if (section == entry) {
-                            MaterialTheme.colorScheme.primary
+                            MaterialTheme.colorScheme.accentText
                         } else {
                             MaterialTheme.colorScheme.outline
                         },
@@ -221,11 +222,11 @@ private fun NewPlaylistRow(onCreate: () -> Unit) {
             .padding(horizontal = 20.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Tile { Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+        Tile { Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.accentText) }
         Text(
             text = "New playlist",
             style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.primary,
+            color = MaterialTheme.colorScheme.accentText,
             modifier = Modifier.padding(start = 14.dp),
         )
     }
@@ -305,7 +306,7 @@ private fun TrackRow(track: LibraryTrack, isPlaying: Boolean, onPlay: () -> Unit
                 text = track.title,
                 style = MaterialTheme.typography.bodyLarge,
                 color = if (isPlaying) {
-                    MaterialTheme.colorScheme.primary
+                    MaterialTheme.colorScheme.accentText
                 } else {
                     MaterialTheme.colorScheme.onSurface
                 },

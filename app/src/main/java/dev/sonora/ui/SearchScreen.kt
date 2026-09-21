@@ -50,6 +50,7 @@ import dev.sonora.backend.DownloadState
 import dev.sonora.backend.SearchHit
 import dev.sonora.backend.SonoraBackend
 import dev.sonora.backend.SortMode
+import dev.sonora.ui.theme.accentText
 import dev.sonora.ui.theme.onSurfaceFaint
 
 @Composable
@@ -99,7 +100,7 @@ fun SearchScreen() {
                         border = BorderStroke(
                             width = 1.dp,
                             color = if (sort == mode) {
-                                MaterialTheme.colorScheme.primary
+                                MaterialTheme.colorScheme.accentText
                             } else {
                                 MaterialTheme.colorScheme.outline
                             },
@@ -158,7 +159,7 @@ private fun SearchBar(
             unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
             focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
             unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            focusedLeadingIconColor = MaterialTheme.colorScheme.primary,
+            focusedLeadingIconColor = MaterialTheme.colorScheme.accentText,
             unfocusedLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
             focusedTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
             unfocusedTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -296,7 +297,7 @@ private fun DownloadStatus(state: DownloadState) {
         is DownloadState.Completed -> Text(
             text = "Saved ${state.filename} (${formatSize(state.bytes)})",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.primary,
+            color = MaterialTheme.colorScheme.accentText,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
 
