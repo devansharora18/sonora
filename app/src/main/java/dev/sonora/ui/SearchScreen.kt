@@ -219,17 +219,26 @@ private fun ResultRow(hit: SearchHit, onDownload: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
 
-            Text(
-                text = listOfNotNull(
-                    hit.peer,
-                    quality(hit).ifEmpty { null },
-                    formatSize(hit.size),
-                ).joinToString("  \u00b7  "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    // Size is deliberately not part of this line: it was being truncated away
+                    // behind the peer name, and it decides whether a download is worth starting.
+                    text = listOfNotNull(hit.peer, quality(hit).ifEmpty { null })
+                        .joinToString("  \u00b7  "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = formatSize(hit.size),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
 
             Text(
                 text = hit.filename.substringBeforeLast('\\', ""),
