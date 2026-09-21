@@ -30,11 +30,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sonora.backend.LibraryTrack
 import dev.sonora.ui.theme.accentText
+import java.io.File
 
 /**
  * Small pieces shared by more than one screen.
@@ -46,15 +48,74 @@ import dev.sonora.ui.theme.accentText
 
 /** The 56dp leading square shared by track and playlist rows, so the lists line up. */
 @Composable
-internal fun Tile(content: @Composable () -> Unit) {
+internal fun Tile(shape: Shape = RoundedCornerShape(4.dp), content: @Composable () -> Unit) {
     Box(
         modifier = Modifier
             .size(56.dp)
-            .clip(RoundedCornerShape(4.dp))
+            .clip(shape)
             .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
         content()
+    }
+}
+
+/**
+ * A list row for a group of tracks — an album or an artist — taking its artwork from the first
+ * track in the group, since a group has no artwork of its own.
+ */
+@Composable
+internal fun ArtworkRow(
+    artworkFile: File?,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    shape: Shape = RoundedCornerShape(4.dp),
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Tile(shape = shape) {
+            val artwork = if (artworkFile != null) rememberArtwork(artworkFile) else null
+
+            if (artwork != null) {
+                Image(
+                    bitmap = artwork,
+                    contentDescription = "Artwork",
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Filled.MusicNote,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 14.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 

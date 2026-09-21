@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -62,6 +64,7 @@ import dev.sonora.ui.theme.accentText
 private enum class LibrarySection(val label: String) {
     Tracks("Tracks"),
     Albums("Albums"),
+    Artists("Artists"),
     Playlists("Playlists"),
 }
 
@@ -75,6 +78,7 @@ fun LibraryScreen() {
     var creating by remember { mutableStateOf(false) }
     var openPlaylistId by remember { mutableStateOf<String?>(null) }
     var openAlbum by remember { mutableStateOf<LibraryGrouping.Album?>(null) }
+    var openArtist by remember { mutableStateOf<LibraryGrouping.Artist?>(null) }
     var addTarget by remember { mutableStateOf<LibraryTrack?>(null) }
     var deleteTarget by remember { mutableStateOf<LibraryTrack?>(null) }
     var failedDelete by remember { mutableStateOf<LibraryTrack?>(null) }
@@ -90,6 +94,7 @@ fun LibraryScreen() {
     val byPath = remember(tracks) { tracks.associateBy { it.file.absolutePath } }
     val likedPaths = remember(playlists) { Playlists.likedPaths(playlists) }
     val albums = remember(tracks) { LibraryGrouping.albums(tracks) }
+    val artists = remember(tracks) { LibraryGrouping.artists(tracks) }
 
     // Delete is only offered for files in the download folder. Now that the library also lists music
     // from the rest of the device, offering to delete someone's own collection would be wrong.
@@ -106,6 +111,18 @@ fun LibraryScreen() {
             album = album,
             onBack = { openAlbum = null },
             onPlayFrom = { index -> SonoraPlayer.play(context, album.tracks, index) },
+        )
+        return
+    }
+
+    val artist = openArtist
+
+    if (artist != null) {
+        BackHandler { openArtist = null }
+        ArtistDetailScreen(
+            artist = artist,
+            onBack = { openArtist = null },
+            onPlayFrom = { index -> SonoraPlayer.play(context, artist.tracks, index) },
         )
         return
     }
@@ -186,6 +203,11 @@ fun LibraryScreen() {
                 LibrarySection.Albums -> AlbumsSection(
                     albums = albums,
                     onOpen = { openAlbum = it },
+                )
+
+                LibrarySection.Artists -> ArtistsSection(
+                    artists = artists,
+                    onOpen = { openArtist = it },
                 )
 
                 LibrarySection.Playlists -> PlaylistsSection(
@@ -348,52 +370,50 @@ private fun AlbumsSection(
 
 @Composable
 private fun AlbumRow(album: LibraryGrouping.Album, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Tile {
-            // Artwork from the album's first track: the album has no artwork of its own, and the
-            // files of one album normally carry the same embedded cover.
-            val artwork = album.tracks.firstOrNull()?.let { rememberArtwork(it.file) }
-            if (artwork != null) {
-                Image(
-                    bitmap = artwork,
-                    contentDescription = "Album artwork",
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Filled.MusicNote,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
+    ArtworkRow(
+        artworkFile = album.tracks.firstOrNull()?.file,
+        title = album.name,
+        subtitle = listOf(
+            album.artist,
+            if (album.tracks.size == 1) "1 track" else "${album.tracks.size} tracks",
+        ).joinToString("  \u00b7  "),
+        onClick = onClick,
+    )
+}
 
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(start = 14.dp),
-        ) {
-            Text(
-                text = album.name,
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = listOf(
-                    album.artist,
-                    if (album.tracks.size == 1) "1 track" else "${album.tracks.size} tracks",
+@Composable
+private fun ArtistsSection(
+    artists: List<LibraryGrouping.Artist>,
+    onOpen: (LibraryGrouping.Artist) -> Unit,
+) {
+    if (artists.isEmpty()) {
+        EmptyState(
+            icon = Icons.Filled.Person,
+            title = "No artists found",
+            message = "Download music, or add files to Music/Soulseek.",
+        )
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        items(artists, key = { it.name }) { artist ->
+            ArtworkRow(
+                artworkFile = artist.tracks.firstOrNull()?.file,
+                title = artist.name,
+                subtitle = listOf(
+                    run {
+                        val albums = LibraryGrouping.albums(artist.tracks).size
+                        if (albums == 1) "1 album" else "$albums albums"
+                    },
+                    if (artist.tracks.size == 1) "1 track" else "${artist.tracks.size} tracks",
                 ).joinToString("  \u00b7  "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                // Circular, which is the convention for an artist as opposed to a release.
+                shape = CircleShape,
+                onClick = { onOpen(artist) },
             )
         }
     }
