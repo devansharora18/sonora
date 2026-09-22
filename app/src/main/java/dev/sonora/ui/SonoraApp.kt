@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
@@ -115,6 +116,7 @@ fun SonoraApp() {
             // Playlists outlive the session, so they are read once when the app is usable rather
             // than on every visit to the Library.
             LaunchedEffect(Unit) { SonoraBackend.refreshPlaylists(context) }
+            LaunchedEffect(Unit) { SonoraBackend.refreshSettings(context) }
 
             LaunchedEffect(playback.track, playback.isPlaying) {
                 while (playback.track != null) {
@@ -145,14 +147,6 @@ fun SonoraApp() {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text("Sonora", style = MaterialTheme.typography.titleLarge)
-                    TextButton(
-                        onClick = { SonoraBackend.disconnect(context) },
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                    ) {
-                        Text("Disconnect")
-                    }
                 }
 
                 Box(modifier = Modifier.weight(1f)) {
@@ -160,6 +154,7 @@ fun SonoraApp() {
                         MainTab.Home -> HomeScreen()
                         MainTab.Search -> SearchScreen()
                         MainTab.Library -> LibraryScreen()
+                        MainTab.Settings -> SettingsScreen()
                     }
                 }
 
@@ -216,12 +211,14 @@ private enum class MainTab(val label: String) {
     Home("Home"),
     Search("Search"),
     Library("Library"),
+    Settings("Settings"),
 }
 
 private fun MainTab.icon(): ImageVector = when (this) {
     MainTab.Home -> Icons.Filled.Home
     MainTab.Search -> Icons.Filled.Search
     MainTab.Library -> Icons.AutoMirrored.Filled.List
+    MainTab.Settings -> Icons.Filled.Settings
 }
 
 /** Shown above the tabs whenever something is loaded, on either screen. */

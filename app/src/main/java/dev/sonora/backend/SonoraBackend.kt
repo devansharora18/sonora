@@ -53,6 +53,7 @@ object SonoraBackend {
     private val UNSAFE_FILENAME = Regex("[^A-Za-z0-9 ._()\\[\\]&'-]")
 
     private const val PLAYLISTS_FILE = "playlists.json"
+    private const val SETTINGS_FILE = "settings.json"
     private const val MAX_FILENAME_LENGTH = 180
     private const val PROGRESS_POLL_MS = 400L
 
@@ -80,6 +81,10 @@ object SonoraBackend {
 
     val playlists: StateFlow<List<Playlist>> = _playlists.asStateFlow()
 
+    private val _settings = MutableStateFlow(Settings())
+
+    val settings: StateFlow<Settings> = _settings.asStateFlow()
+
     /**
      * Rescans the download directory.
      *
@@ -89,7 +94,8 @@ object SonoraBackend {
      */
     fun refreshLibrary(context: Context) {
         scope.launch {
-            val directory = MusicDirectory.resolve(context).directory
+            val location = MusicDirectory.resolve(context)
+            val directory = location.directory
 
             val downloaded = directory.listFiles()
                 ?.filter { it.isFile && it.extension.lowercase() in AUDIO_EXTENSIONS }
@@ -98,15 +104,27 @@ object SonoraBackend {
                 .orEmpty()
 
             // The folder scan comes first because a just-downloaded file is not in MediaStore yet:
-            // registering it with the media scanner is asynchronous. Everything else comes from the
-            // provider, which already has the tags and reaches the rest of the device.
+            // registering it with the media scanner is asynchronous.
             val known = downloaded.mapTo(HashSet()) { it.file.absolutePath }
-            val rest = DeviceMusic.list(context).filter { it.file.absolutePath !in known }
 
-            val library = (downloaded + rest).sortedBy { it.title.lowercase() }
+            // Everything else comes from the provider, which already has the tags. It is consulted
+            // even when device music is off — filtered down to the download folder — because it is
+            // the system's own index and does not depend on the app being able to enumerate that
+            // folder itself.
+            val root = directory.absolutePath + File.separator
+            val fromProvider = DeviceMusic.list(context).filter { track ->
+                track.file.absolutePath !in known &&
+                    (_settings.value.includeDeviceMusic || track.file.absolutePath.startsWith(root))
+            }
+
+            val library = (downloaded + fromProvider).sortedBy { it.title.lowercase() }
             _library.value = library
 
-            Log.d(TAG, "library: ${library.size} track(s) (${downloaded.size} downloaded)")
+            Log.d(
+                TAG,
+                "library: ${library.size} track(s), ${downloaded.size} from " +
+                    "${directory.absolutePath} (shared=${location.shared})",
+            )
         }
     }
 
@@ -118,6 +136,27 @@ object SonoraBackend {
      */
     fun refreshPlaylists(context: Context) {
         scope.launch { _playlists.value = store(context).load() }
+    }
+
+    fun refreshSettings(context: Context) {
+        scope.launch { _settings.value = settingsStore(context).load() }
+    }
+
+    /**
+     * Stores a preference and re-applies anything it affects.
+     *
+     * The library is rebuilt rather than filtered in place, because the setting decides what is
+     * *read* — with device music off there is nothing to filter, only a query not to run.
+     */
+    fun setIncludeDeviceMusic(context: Context, enabled: Boolean) {
+        scope.launch {
+            val updated = _settings.value.copy(includeDeviceMusic = enabled)
+            if (updated == _settings.value) return@launch
+
+            settingsStore(context).save(updated)
+            _settings.value = updated
+            refreshLibrary(context)
+        }
     }
 
     /**
@@ -204,6 +243,9 @@ object SonoraBackend {
     }
 
     private fun store(context: Context) = PlaylistStore(File(context.filesDir, PLAYLISTS_FILE))
+
+    private fun settingsStore(context: Context) =
+        SettingsStore(File(context.filesDir, SETTINGS_FILE))
 
     /**
      * Downloads one search result into app-private storage.
