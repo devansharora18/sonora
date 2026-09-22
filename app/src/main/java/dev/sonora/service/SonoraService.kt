@@ -88,6 +88,11 @@ class SonoraService : Service() {
         download is DownloadState.Downloading ->
             getString(R.string.notification_downloading, download.filename)
 
+        // Surfaced rather than falling through to "connected": a failed transfer is the one thing
+        // here the user needs to know about, and they are usually not looking at the app.
+        download is DownloadState.Failed ->
+            getString(R.string.notification_download_failed, download.filename)
+
         backend is BackendState.Connecting -> getString(R.string.notification_connecting)
 
         else -> getString(R.string.notification_connected)

@@ -5,5 +5,6 @@
     <string name="notification_connecting">Connecting to the Soulseek network</string>
     <string name="notification_connected">Connected to Soulseek</string>
     <string name="notification_downloading">Downloading %1$s</string>
+    <string name="notification_download_failed">Download failed: %1$s</string>
     <string name="notification_disconnect">Disconnect</string>
 </resources>
