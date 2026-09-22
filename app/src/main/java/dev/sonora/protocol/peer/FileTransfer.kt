@@ -73,5 +73,26 @@ object FileTransfer {
         return copied
     }
 
+    /**
+     * Discards [length] bytes from [input], returning how many were actually skipped.
+     *
+     * A plain [InputStream.skip] may skip fewer bytes than asked, which for a resume would
+     * silently send the wrong part of the file.
+     */
+    fun skipBytes(input: InputStream, length: Long): Long {
+        val buffer = ByteArray(BUFFER_BYTES)
+        var skipped = 0L
+
+        while (skipped < length) {
+            val wanted = minOf(buffer.size.toLong(), length - skipped).toInt()
+            val read = input.read(buffer, 0, wanted)
+            if (read < 0) break
+
+            skipped += read
+        }
+
+        return skipped
+    }
+
     private const val BUFFER_BYTES = 64 * 1024
 }

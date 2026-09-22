@@ -466,8 +466,63 @@ class SoulseekSession(
         }
     }
 
+    /**
+     * Sends a file a peer asked for.
+     *
+     * We speak first on this connection: announce the transfer with the token from the
+     * negotiation, wait for the peer to say where to resume from, then stream the rest.
+     *
+     * The connection is closed once everything is sent. The reference warns that the *downloader*
+     * closes the connection to signal completion, but the downloader knows the size it asked for
+     * and stops at it, so closing after the last byte cannot truncate anything — and leaving the
+     * socket open would leak it whenever a peer never comes back.
+     */
+    private fun serveUpload(session: PeerSession, upload: NegotiatingUpload) {
+        try {
+            val out = session.outputStream()
+            out.write(FileTransfer.Init.encode(upload.token))
+            out.flush()
+
+            val offset = FileTransfer.Offset.parse(
+                session.inputStream().readExactly(FileTransfer.Offset.BYTES),
+            )
+
+            upload.file.inputStream().use { input ->
+                FileTransfer.skipBytes(input, offset)
+
+                val sent = FileTransfer.copyBytes(
+                    input = input,
+                    destination = out,
+                    length = upload.file.length() - offset,
+                )
+
+                onTrace("uploaded $sent bytes of ${upload.virtualPath} to ${session.username}")
+            }
+        } catch (e: Exception) {
+            // A peer that hangs up mid-transfer is ordinary, not an error worth surfacing.
+            onTrace("upload to ${session.username} ended: ${e.javaClass.simpleName}")
+        } finally {
+            session.close()
+        }
+    }
+
     /** Receives a file over an established `F` connection and completes the pending transfer. */
     private fun handleFileConnection(session: PeerSession) {
+        // An upload connection is recognised by who opened it, not by what it says: the peer
+        // speaks only after we announce the transfer, because we are the uploader.
+        //
+        // Both maps are consulted because of a race: the peer's acceptance is handled on its peer
+        // connection's thread while this connection arrives on the listener's, so the acceptance
+        // may not have moved the upload to `pendingUploads` yet. Having offered a file is proof
+        // enough that a file connection from that user is the upload.
+        val upload = pendingUploads.remove(session.username)
+            ?: negotiatingUploads.remove(session.username)
+
+        if (upload != null) {
+            serveUpload(session, upload)
+            return
+        }
+
         var transfer: PendingTransfer? = null
 
         try {

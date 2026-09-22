@@ -2,7 +2,6 @@ package dev.sonora.protocol
 
 import dev.sonora.protocol.peer.FileTransfer
 import dev.sonora.protocol.peer.PeerInit
-import dev.sonora.protocol.peer.PeerSession
 import dev.sonora.protocol.peer.QueueUpload
 import dev.sonora.protocol.peer.SearchResponse
 import dev.sonora.protocol.peer.SearchWire
@@ -467,11 +466,112 @@ class SoulseekSessionTest {
         }
     }
 
-    /** Dials the listener the session advertised and completes a peer handshake on it. */
-    private fun peerTo(server: FakeSoulseekServer, username: String): Socket {
-        val listenPort = MessageReader(server.await(SetWaitPort.CODE).body).readUInt32().toInt()
+    @Test
+    fun `serves the bytes of a file a peer asked for`() {
+        val share = folder.newFolder("Soulseek")
+        val payload = ByteArray(5_000) { index -> (index % 251).toByte() }
+        File(share, "song.flac").writeBytes(payload)
 
-        val socket = Socket(InetAddress.getLoopbackAddress(), listenPort)
+        FakeSoulseekServer().use { server ->
+            session(server, shareDirectory = share).use { session ->
+                session.connect()
+
+                // Negotiate on the peer connection.
+                val negotiation = peerTo(server, "downloader")
+                Framing.PEER.write(
+                    negotiation.getOutputStream(),
+                    QueueUpload.CODE,
+                    QueueUpload.request("Soulseek\\song.flac"),
+                )
+
+                val request = TransferRequest.parse(
+                    Framing.PEER.read(negotiation.getInputStream()).body,
+                )
+
+                Framing.PEER.write(
+                    negotiation.getOutputStream(),
+                    TransferResponse.CODE,
+                    TransferResponse.accepted(request.token),
+                )
+
+                // The peer then opens a file connection and collects the file.
+                peerTo(server, "downloader", type = PeerInit.TYPE_FILE).use { fileConnection ->
+                    fileConnection.soTimeout = 5_000
+
+                    val input = fileConnection.getInputStream()
+                    assertEquals(request.token, FileTransfer.readInitToken(input))
+
+                    FileTransfer.requestFrom(fileConnection.getOutputStream(), offset = 0)
+
+                    assertArrayEquals(payload, input.readExactly(payload.size))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `a resume sends the file from the requested offset`() {
+        val share = folder.newFolder("Soulseek")
+        val payload = ByteArray(3_000) { index -> (index % 251).toByte() }
+        File(share, "song.flac").writeBytes(payload)
+
+        val offset = 1_000L
+
+        FakeSoulseekServer().use { server ->
+            session(server, shareDirectory = share).use { session ->
+                session.connect()
+
+                val negotiation = peerTo(server, "downloader")
+                Framing.PEER.write(
+                    negotiation.getOutputStream(),
+                    QueueUpload.CODE,
+                    QueueUpload.request("Soulseek\\song.flac"),
+                )
+                val request = TransferRequest.parse(
+                    Framing.PEER.read(negotiation.getInputStream()).body,
+                )
+                Framing.PEER.write(
+                    negotiation.getOutputStream(),
+                    TransferResponse.CODE,
+                    TransferResponse.accepted(request.token),
+                )
+
+                peerTo(server, "downloader", type = PeerInit.TYPE_FILE).use { fileConnection ->
+                    fileConnection.soTimeout = 5_000
+
+                    val input = fileConnection.getInputStream()
+                    FileTransfer.readInitToken(input)
+                    FileTransfer.requestFrom(fileConnection.getOutputStream(), offset)
+
+                    assertArrayEquals(
+                        payload.copyOfRange(offset.toInt(), payload.size),
+                        input.readExactly(payload.size - offset.toInt()),
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * The port the session advertised, read once.
+     *
+     * `SetWaitPort` arrives a single time, so a helper that awaited it per call would hang on the
+     * second peer a test opens.
+     */
+    private var listenPort: Int? = null
+
+    /** Dials the listener the session advertised and completes a peer handshake on it. */
+    private fun peerTo(
+        server: FakeSoulseekServer,
+        username: String,
+        type: String = PeerInit.TYPE_PEER,
+    ): Socket {
+        val port = listenPort ?: MessageReader(server.await(SetWaitPort.CODE).body)
+            .readUInt32()
+            .toInt()
+            .also { listenPort = it }
+
+        val socket = Socket(InetAddress.getLoopbackAddress(), port)
         socket.soTimeout = 5_000
 
         Framing.PEER_INIT.write(
@@ -479,7 +579,7 @@ class SoulseekSessionTest {
             PeerInit.CODE,
             MessageWriter()
                 .writeString(username)
-                .writeString(PeerInit.TYPE_PEER)
+                .writeString(type)
                 .writeUInt32(0)
                 .toByteArray(),
         )
