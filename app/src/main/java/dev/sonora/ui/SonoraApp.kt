@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -138,17 +139,13 @@ fun SonoraApp() {
                     onAddToPlaylist = { addTarget = playback.track },
                 )
             } else {
-                Column(modifier = Modifier.fillMaxSize()) {
-                Row(
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+                        .fillMaxSize()
+                        // The screen headers are the top of the UI now that the app title bar is
+                        // gone, so the status bar has to be inset here instead.
+                        .statusBarsPadding(),
                 ) {
-                    Text("Sonora", style = MaterialTheme.typography.titleLarge)
-                }
-
                 Box(modifier = Modifier.weight(1f)) {
                     when (tab) {
                         MainTab.Home -> HomeScreen()
