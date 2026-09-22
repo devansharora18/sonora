@@ -2,6 +2,9 @@ package dev.sonora.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,7 +35,25 @@ fun SettingsScreen() {
 
     // Resolved once per visit rather than tracked: the folder only changes when the storage
     // permission is granted, which takes a restart of this screen to reflect.
-    val downloads = remember { MusicDirectory.resolve(context) }
+    val downloads = remember(settings.downloadTreeUri) {
+        MusicDirectory.resolve(context, settings.downloadTreeUri)
+    }
+
+    val pickFolder = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            // Persisted so the grant outlives the process; without it the folder is only usable
+            // until the app is next started.
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+            SonoraBackend.setDownloadTree(context, uri.toString())
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -72,15 +93,44 @@ fun SettingsScreen() {
         SectionTitle("Storage")
 
         Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
-            Text("Downloads", style = MaterialTheme.typography.bodyLarge)
+            Text("Download folder", style = MaterialTheme.typography.bodyLarge)
             Text(
                 text = downloads.directory.absolutePath,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Text(
+                text = if (settings.downloadTreeUri != null) {
+                    "Files here belong to you, so they stay if Sonora is uninstalled."
+                } else {
+                    "Files Sonora creates here are deleted if Sonora is uninstalled. Choose a " +
+                        "folder to keep them."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (settings.downloadTreeUri != null) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+                modifier = Modifier.padding(top = 4.dp),
+            )
+
+            Row(modifier = Modifier.padding(top = 8.dp)) {
+                TextButton(onClick = { pickFolder.launch(null) }) { Text("Choose folder") }
+
+                if (settings.downloadTreeUri != null) {
+                    TextButton(
+                        onClick = { SonoraBackend.setDownloadTree(context, null) },
+                        modifier = Modifier.padding(start = 8.dp),
+                    ) {
+                        Text("Use default", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+
             if (!downloads.shared) {
                 // Worth saying out loud: the files are invisible to other apps in this state, which
-                // is the opposite of why the shared folder is the default.
+                // is the opposite of why a shared folder is the default.
                 Text(
                     text = "Shared storage isn't writable, so downloads are being kept in " +
                         "Sonora's private storage instead.",

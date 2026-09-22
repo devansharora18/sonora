@@ -15,4 +15,12 @@ data class Settings(
      * downloads. Some users want the app to stay a download manager; others want a player.
      */
     val includeDeviceMusic: Boolean = true,
+
+    /**
+     * A folder the user picked for downloads, as a persisted tree URI.
+     *
+     * Preferred over the default because files Sonora creates itself are deleted when the app is
+     * uninstalled, whereas files the system's document provider creates are not.
+     */
+    val downloadTreeUri: String? = null,
 )

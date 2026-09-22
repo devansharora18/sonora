@@ -2,7 +2,9 @@ package dev.sonora.backend
 
 import android.content.Context
 import android.media.MediaScannerConnection
+import android.net.Uri
 import android.os.Environment
+import android.provider.DocumentsContract
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -10,14 +12,14 @@ import java.nio.file.StandardCopyOption
 /**
  * Where downloaded files live.
  *
- * Shared `Music/Soulseek` rather than app-private storage: these are the user's music files, and
- * putting them where every other player and file manager can see them is most of the point of
- * downloading them at all. App-private storage remains the fallback for when shared storage is not
- * writable, because a music app that silently stops downloading is worse than one saving somewhere
- * less convenient.
+ * A folder the user picked through the system file picker is preferred. That is not just a
+ * preference: files Sonora creates itself in shared storage are attributed to Sonora, and Android
+ * deletes them when the app is uninstalled. When the system's own document provider creates the
+ * file instead, it belongs to the user and survives.
  *
- * API 30+ needs no permission to contribute to a media collection like `Music/`. Below that the
- * caller must hold `WRITE_EXTERNAL_STORAGE`, and [resolve] falls back until it does.
+ * Without a chosen folder it falls back to `Music/Soulseek`, and then to app-private storage if
+ * shared storage is not writable — a music app that silently stops downloading is worse than one
+ * saving somewhere less convenient.
  */
 object MusicDirectory {
 
@@ -26,14 +28,18 @@ object MusicDirectory {
     /** Where downloads went before they moved to shared storage. */
     private const val LEGACY_FOLDER = "downloads"
 
-    data class Location(val directory: File, val shared: Boolean)
+    data class Location(val directory: File, val shared: Boolean, val tree: Uri? = null)
 
     /**
-     * Resolved per call rather than cached: it depends on a permission that can be granted after
-     * the process started.
+     * Resolved per call rather than cached: it depends on a permission and a user choice that can
+     * both change while the process is alive.
      */
     @Suppress("DEPRECATION")
-    fun resolve(context: Context): Location {
+    fun resolve(context: Context, treeUri: String? = null): Location {
+        val tree = treeUri?.let { runCatching { Uri.parse(it) }.getOrNull() }
+        val chosen = tree?.let { pathOf(it) }
+        if (chosen != null) return Location(File(chosen), shared = true, tree = tree)
+
         val shared = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
             FOLDER,
@@ -44,6 +50,22 @@ object MusicDirectory {
         } else {
             Location(File(context.filesDir, LEGACY_FOLDER), shared = false)
         }
+    }
+
+    /**
+     * The filesystem path behind a chosen tree, or null if it is not on the primary volume.
+     *
+     * Files created through the tree still land on the shared volume at a real path, so everything
+     * downstream — the library scan, playback, artwork, playlists — can keep working with plain
+     * files. Only the creation step has to go through the document provider.
+     */
+    @Suppress("DEPRECATION")
+    private fun pathOf(tree: Uri): String? {
+        val id = runCatching { DocumentsContract.getTreeDocumentId(tree) }.getOrNull() ?: return null
+        val parts = id.split(':', limit = 2)
+        if (parts.size != 2 || parts[0] != "primary") return null
+
+        return "${Environment.getExternalStorageDirectory().absolutePath}/${parts[1]}"
     }
 
     private fun usable(directory: File): Boolean = runCatching {

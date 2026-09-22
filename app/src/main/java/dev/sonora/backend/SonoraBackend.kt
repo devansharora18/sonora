@@ -2,6 +2,8 @@ package dev.sonora.backend
 
 import android.content.Context
 import android.media.MediaScannerConnection
+import android.net.Uri
+import android.provider.DocumentsContract
 import android.util.Log
 import dev.sonora.protocol.DownloadOutcome
 import dev.sonora.protocol.SoulseekSession
@@ -94,7 +96,7 @@ object SonoraBackend {
      */
     fun refreshLibrary(context: Context) {
         scope.launch {
-            val location = MusicDirectory.resolve(context)
+            val location = MusicDirectory.resolve(context, _settings.value.downloadTreeUri)
             val directory = location.directory
 
             val downloaded = directory.listFiles()
@@ -151,6 +153,18 @@ object SonoraBackend {
     fun setIncludeDeviceMusic(context: Context, enabled: Boolean) {
         scope.launch {
             val updated = _settings.value.copy(includeDeviceMusic = enabled)
+            if (updated == _settings.value) return@launch
+
+            settingsStore(context).save(updated)
+            _settings.value = updated
+            refreshLibrary(context)
+        }
+    }
+
+    /** Records the folder the user picked for downloads, or null to go back to the default. */
+    fun setDownloadTree(context: Context, uri: String?) {
+        scope.launch {
+            val updated = _settings.value.copy(downloadTreeUri = uri)
             if (updated == _settings.value) return@launch
 
             settingsStore(context).save(updated)
@@ -248,18 +262,30 @@ object SonoraBackend {
         SettingsStore(File(context.filesDir, SETTINGS_FILE))
 
     /**
-     * Downloads one search result into app-private storage.
+     * Downloads one search result.
      *
      * One at a time for now: concurrent transfers need their own queueing and progress story,
      * and a single download is what the flow needs to work first.
+     *
+     * When the user has chosen a folder, the bytes are written to a scratch file first and then
+     * copied into that folder through the document provider. The extra copy buys the one thing that
+     * matters here: a file the provider created is not attributed to Sonora, so uninstalling the
+     * app does not delete the user's music. It also keeps the transfer layer writing to a plain
+     * file, which is what its progress reporting and resume logic already assume.
      */
     fun download(context: Context, hit: SearchHit) {
         val current = session ?: return
         if (_download.value is DownloadState.Downloading) return
 
-        val directory = MusicDirectory.resolve(context).directory.apply { mkdirs() }
-        val destination = destinationFor(directory, hit.filename)
-        val name = destination.name
+        val location = MusicDirectory.resolve(context, _settings.value.downloadTreeUri)
+        val directory = location.directory.apply { mkdirs() }
+        val name = destinationFor(directory, hit.filename).name
+
+        val scratch = if (location.tree != null) {
+            File(context.cacheDir, name)
+        } else {
+            File(directory, name)
+        }
 
         _download.value = DownloadState.Downloading(
             filename = name,
@@ -276,7 +302,7 @@ object SonoraBackend {
                     delay(PROGRESS_POLL_MS)
                     _download.update { state ->
                         if (state is DownloadState.Downloading) {
-                            state.copy(bytes = destination.length())
+                            state.copy(bytes = scratch.length())
                         } else {
                             state
                         }
@@ -284,23 +310,71 @@ object SonoraBackend {
                 }
             }
 
-            val outcome = current.download(hit.peer, hit.filename, destination, hit.size)
+            val outcome = current.download(hit.peer, hit.filename, scratch, hit.size)
             progress.cancel()
 
-            _download.value = when (outcome) {
-                is DownloadOutcome.Completed ->
-                    DownloadState.Completed(name, outcome.bytes, destination.absolutePath)
+            val published = if (outcome is DownloadOutcome.Completed && location.tree != null) {
+                val moved = runCatching {
+                    copyIntoTree(context, location.tree, scratch, name)
+                }.getOrNull()
 
-                is DownloadOutcome.Failed -> DownloadState.Failed(name, outcome.reason)
+                scratch.delete()
+                moved != null
+            } else {
+                true
             }
 
-            if (outcome is DownloadOutcome.Completed) {
+            val target = File(directory, name)
+
+            _download.value = when (outcome) {
+                is DownloadOutcome.Failed -> DownloadState.Failed(name, outcome.reason)
+
+                is DownloadOutcome.Completed -> if (published) {
+                    DownloadState.Completed(name, outcome.bytes, target.absolutePath)
+                } else {
+                    DownloadState.Failed(name, "could not write to the chosen folder")
+                }
+            }
+
+            if (outcome is DownloadOutcome.Completed && published) {
                 // Shared storage is scanned by the media provider, not by us: without this the file
                 // exists but is invisible to every other player and to the system's own music apps.
-                MediaScannerConnection.scanFile(context, arrayOf(destination.absolutePath), null, null)
+                MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), null, null)
                 refreshLibrary(context)
             }
         }
+    }
+
+    /**
+     * Copies a finished file into the user's chosen folder, letting the document provider create
+     * it, and returns whether that worked.
+     */
+    private fun copyIntoTree(context: Context, tree: Uri, source: File, name: String): Uri? {
+        val resolver = context.contentResolver
+        val parent = DocumentsContract.buildDocumentUriUsingTree(
+            tree,
+            DocumentsContract.getTreeDocumentId(tree),
+        )
+
+        val target = DocumentsContract.createDocument(resolver, parent, mimeOf(name), name)
+            ?: return null
+
+        resolver.openOutputStream(target)?.use { output ->
+            source.inputStream().use { it.copyTo(output) }
+        } ?: return null
+
+        return target
+    }
+
+    private fun mimeOf(name: String): String = when (name.substringAfterLast('.').lowercase()) {
+        "mp3" -> "audio/mpeg"
+        "m4a", "aac", "alac" -> "audio/mp4"
+        "ogg", "opus" -> "audio/ogg"
+        "wav" -> "audio/x-wav"
+        "flac" -> "audio/flac"
+        "wma" -> "audio/x-ms-wma"
+        "aiff", "aif" -> "audio/x-aiff"
+        else -> "audio/mpeg"
     }
 
     /**
