@@ -23,4 +23,12 @@ data class Settings(
      * uninstalled, whereas files the system's document provider creates are not.
      */
     val downloadTreeUri: String? = null,
+
+    /**
+     * Whether the user has already been asked where downloads should go.
+     *
+     * Without this the question would be asked again on every download after they chose the
+     * default, which is nagging rather than helping.
+     */
+    val promptedForDownloadFolder: Boolean = false,
 )

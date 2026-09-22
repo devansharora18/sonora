@@ -164,12 +164,31 @@ object SonoraBackend {
     /** Records the folder the user picked for downloads, or null to go back to the default. */
     fun setDownloadTree(context: Context, uri: String?) {
         scope.launch {
-            val updated = _settings.value.copy(downloadTreeUri = uri)
+            val updated = _settings.value.copy(
+                downloadTreeUri = uri,
+                promptedForDownloadFolder = true,
+            )
             if (updated == _settings.value) return@launch
 
             settingsStore(context).save(updated)
             _settings.value = updated
             refreshLibrary(context)
+        }
+    }
+
+    /**
+     * Records that the user declined a folder and wants the default location.
+     *
+     * Remembered so the question is asked once. It is a real answer, not a dismissal: the files
+     * land somewhere that Android deletes along with the app.
+     */
+    fun useDefaultDownloadFolder(context: Context) {
+        scope.launch {
+            val updated = _settings.value.copy(promptedForDownloadFolder = true)
+            if (updated == _settings.value) return@launch
+
+            settingsStore(context).save(updated)
+            _settings.value = updated
         }
     }
 

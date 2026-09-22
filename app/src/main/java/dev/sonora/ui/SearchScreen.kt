@@ -1,5 +1,8 @@
 package dev.sonora.ui
 
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -25,11 +28,13 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -58,12 +63,46 @@ fun SearchScreen() {
     val context = LocalContext.current
     val state by SonoraBackend.search.collectAsState()
     val download by SonoraBackend.download.collectAsState()
+    val settings by SonoraBackend.settings.collectAsState()
     var query by remember { mutableStateOf("") }
 
     // YT Music's sort control, and a *fastest* source is exactly what a P2P result list needs:
     // without it you pick a peer at random and wait.
     val sort = state.sort
     fun onSort(mode: SortMode) = SonoraBackend.setSort(mode)
+
+    // Asked once, before the first download. Where the files land decides whether they survive
+    // uninstalling the app, so it is worth one question rather than a silent default.
+    var askingWhere by remember { mutableStateOf(false) }
+    var waiting by remember { mutableStateOf<SearchHit?>(null) }
+
+    val pickFolder = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+            SonoraBackend.setDownloadTree(context, uri.toString())
+        }
+
+        // Cancelling the picker cancels the download: the question is still unanswered, and the
+        // tap is easy to repeat.
+        if (uri != null) waiting?.let { SonoraBackend.download(context, it) }
+        waiting = null
+    }
+
+    fun startDownload(hit: SearchHit) {
+        if (settings.downloadTreeUri == null && !settings.promptedForDownloadFolder) {
+            waiting = hit
+            askingWhere = true
+        } else {
+            SonoraBackend.download(context, hit)
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Text(
@@ -124,9 +163,48 @@ fun SearchScreen() {
 
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(state.hits, key = { it.peer + it.filename }) { hit ->
-                ResultRow(hit, onDownload = { SonoraBackend.download(context, hit) })
+                ResultRow(hit, onDownload = { startDownload(hit) })
             }
         }
+    }
+
+    if (askingWhere) {
+        AlertDialog(
+            onDismissRequest = {
+                askingWhere = false
+                waiting = null
+            },
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            title = { Text("Where should downloads go?") },
+            text = {
+                Text(
+                    "Files Sonora creates in shared storage are deleted if you uninstall the " +
+                        "app. Choose a folder and the files are yours to keep.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        askingWhere = false
+                        pickFolder.launch(null)
+                    },
+                ) {
+                    Text("Choose folder")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        askingWhere = false
+                        SonoraBackend.useDefaultDownloadFolder(context)
+                        waiting?.let { SonoraBackend.download(context, it) }
+                        waiting = null
+                    },
+                ) {
+                    Text("Use default", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+        )
     }
 }
 
