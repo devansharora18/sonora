@@ -1,6 +1,7 @@
 package dev.sonora.protocol.peer
 
 import dev.sonora.protocol.MessageReader
+import dev.sonora.protocol.MessageWriter
 
 /**
  * Peer code 50. Rejects a `QueueUpload`, or revokes a file that was previously queued.
@@ -19,6 +20,10 @@ object UploadDenied {
             reason = reader.readString(),
         )
     }
+
+    /** Tells a peer we will not send the file it asked for. */
+    fun deny(filename: String, reason: String): ByteArray =
+        MessageWriter().writeString(filename).writeString(reason).toByteArray()
 }
 
 data class Denial(val filename: String, val reason: String)

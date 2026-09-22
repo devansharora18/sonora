@@ -106,6 +106,18 @@ class SoulseekSession(
     private val pendingAddresses = ConcurrentHashMap<String, BlockingQueue<UserAddress>>()
     private val pendingTransfers = ConcurrentHashMap<Long, PendingTransfer>()
 
+    /** Uploads a peer has asked for and we have offered, awaiting its answer. */
+    private val negotiatingUploads = ConcurrentHashMap<String, NegotiatingUpload>()
+
+    /**
+     * Uploads the peer accepted, keyed by username.
+     *
+     * Keyed by user rather than token because the peer opens the file connection without saying
+     * anything first — we are the uploader, so we speak first on it. The username is the only
+     * thing tying that connection back to the negotiation.
+     */
+    private val pendingUploads = ConcurrentHashMap<String, NegotiatingUpload>()
+
     private val dials = ThreadPoolExecutor(
         maxConcurrentPeers,
         maxConcurrentPeers,
@@ -293,8 +305,7 @@ class SoulseekSession(
         return dialDirect(username, address, PeerInit.TYPE_PEER)
     }
 
-    private fun countShared(root: File): Pair<Long, Long> {
-        if (!root.isDirectory) return 0L to 0L
+    private fun countShared(root: File): Pair<Long, Long> {        if (!root.isDirectory) return 0L to 0L
 
         var directories = 0L
         var files = 0L
@@ -306,8 +317,7 @@ class SoulseekSession(
         return directories to files
     }
 
-    private fun resolveAddress(username: String): UserAddress? {
-        val connection = checkNotNull(server) { "not connected" }
+    private fun resolveAddress(username: String): UserAddress? {        val connection = checkNotNull(server) { "not connected" }
 
         val pending = LinkedBlockingQueue<UserAddress>()
         pendingAddresses[username] = pending
@@ -585,9 +595,95 @@ class SoulseekSession(
 
             SharedFileListRequest.CODE -> replyWithSharedFiles(session)
 
-            // Upload handling lands here once it exists.
+            QueueUpload.CODE -> handleQueueUpload(session, message.body)
+
+            TransferResponse.CODE -> handleUploadAnswer(session, message.body)
+
+            UploadDenied.CODE -> {
+                // A peer that asked for a file and then changed its mind, or revoked a queued one.
+                val denial = runCatching { UploadDenied.parse(message.body) }.getOrNull()
+                if (denial != null) {
+                    onTrace("upload denied by ${session.username}: ${denial.reason}")
+                    pendingUploads.remove(session.username)
+                    negotiatingUploads.remove(session.username)
+                }
+            }
+
+            // Upload serving lands here once it exists.
             else -> Unit
         }
+    }
+
+    /**
+     * A peer wants one of our files.
+     *
+     * Answered with a [TransferRequest] rather than by opening the connection ourselves: the peer
+     * dials back, which is what stops a spoofed peer from making us connect out to it.
+     */
+    private fun handleQueueUpload(session: PeerSession, body: ByteArray) {
+        val requested = runCatching { QueueUpload.parse(body) }.getOrNull() ?: return
+        val root = shareDirectory ?: return
+
+        val file = runCatching { findSharedFile(root, requested) }.getOrNull()
+
+        if (file == null) {
+            onTrace("upload requested but not shared: $requested")
+            runCatching {
+                session.send(UploadDenied.CODE, UploadDenied.deny(requested, "File not shared."))
+            }
+            return
+        }
+
+        // The token has to exist before the peer answers, so the reply can be matched to it.
+        val token = nextToken.getAndIncrement() and 0xFFFF_FFFFL
+        negotiatingUploads[session.username] = NegotiatingUpload(token, file, requested)
+
+        onTrace("upload queued by ${session.username}: $requested (${file.length()} bytes)")
+
+        runCatching {
+            session.send(TransferRequest.CODE, TransferRequest.request(token, requested, file.length()))
+        }.onFailure {
+            negotiatingUploads.remove(session.username)
+            onTrace("upload request failed: ${it.javaClass.simpleName}")
+        }
+    }
+
+    /** The peer's answer to an upload we offered: ready to serve, or not. */
+    private fun handleUploadAnswer(session: PeerSession, body: ByteArray) {
+        val answer = runCatching { TransferResponse.parse(body) }.getOrNull() ?: return
+        val negotiating = negotiatingUploads[session.username] ?: return
+        if (negotiating.token != answer.token) return
+
+        if (!answer.allowed) {
+            onTrace("upload refused by ${session.username}: ${answer.reason}")
+            negotiatingUploads.remove(session.username)
+            return
+        }
+
+        // Moved rather than copied: from here the peer is expected to open the file connection,
+        // and it is the username that identifies it as an upload when it arrives.
+        negotiatingUploads.remove(session.username)
+        pendingUploads[session.username] = negotiating
+    }
+
+    /**
+     * Resolves a requested virtual path to a file inside the share.
+     *
+     * Matched against the paths we enumerated rather than joined onto the share root, so a peer
+     * cannot reach outside it with `..` — anything it names has to be something we offered.
+     */
+    private fun findSharedFile(root: File, requested: String): File? {
+        val wanted = requested.lowercase()
+
+        return root.walkTopDown()
+            .filter { it.isFile }
+            .firstOrNull { virtualPathOf(root, it).lowercase() == wanted }
+    }
+
+    /** The path a peer sees for a file: rooted at the share folder's name, backslash separated. */
+    private fun virtualPathOf(root: File, file: File): String {
+        val relative = file.relativeTo(root).invariantSeparatorsPath
+        return "${root.name}\\${relative.replace('/', '\\')}"
     }
 
     /**
@@ -643,6 +739,8 @@ class SoulseekSession(
     override fun close() {
         closed = true
         searches.clear()
+        negotiatingUploads.clear()
+        pendingUploads.clear()
         listener?.close()
         server?.close()
         dials.shutdownNow()
@@ -747,9 +845,21 @@ sealed interface DownloadOutcome {
     data class Failed(val reason: String) : DownloadOutcome
 }
 
+/**
+ * An upload we have offered a peer.
+ *
+ * Held from the moment we send the [TransferRequest] until the file connection is served, because
+ * the peer answers with a token and then connects without identifying itself.
+ */
+private class NegotiatingUpload(
+    val token: Long,
+    val file: File,
+    /** The virtual path the peer asked for, echoed back so it can match the transfer. */
+    val virtualPath: String,
+)
+
 /** The outcome of asking a peer for a file. */
 sealed interface DownloadRequest {
-
     /** The peer accepted and will open a file connection for [filename]. */
     data class Accepted(
         val token: Long,

@@ -3,12 +3,14 @@ package dev.sonora.protocol
 import dev.sonora.protocol.peer.FileTransfer
 import dev.sonora.protocol.peer.PeerInit
 import dev.sonora.protocol.peer.PeerSession
+import dev.sonora.protocol.peer.QueueUpload
 import dev.sonora.protocol.peer.SearchResponse
 import dev.sonora.protocol.peer.SearchWire
 import dev.sonora.protocol.peer.SharedFileListRequest
 import dev.sonora.protocol.peer.SharedFileListResponse
 import dev.sonora.protocol.peer.TransferRequest
 import dev.sonora.protocol.peer.TransferResponse
+import dev.sonora.protocol.peer.UploadDenied
 import dev.sonora.protocol.server.FileSearch
 import dev.sonora.protocol.server.LoginResponse
 import dev.sonora.protocol.server.SetStatus
@@ -385,6 +387,104 @@ class SoulseekSessionTest {
                 }
             }
         }
+    }
+
+    @Test
+    fun `a queue upload is answered with an upload transfer request`() {
+        val share = folder.newFolder("Soulseek")
+        File(share, "song.flac").writeBytes(ByteArray(4321))
+
+        FakeSoulseekServer().use { server ->
+            session(server, shareDirectory = share).use { session ->
+                session.connect()
+
+                peerTo(server, "downloader").use { socket ->
+                    Framing.PEER.write(
+                        socket.getOutputStream(),
+                        QueueUpload.CODE,
+                        QueueUpload.request("Soulseek\\song.flac"),
+                    )
+
+                    val reply = Framing.PEER.read(socket.getInputStream())
+                    assertEquals(TransferRequest.CODE, reply.code)
+
+                    val request = TransferRequest.parse(reply.body)
+                    assertEquals(TransferRequest.DIRECTION_UPLOAD, request.direction)
+                    assertEquals("Soulseek\\song.flac", request.filename)
+                    assertEquals(4321L, request.size)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `a queue upload for something not shared is denied`() {
+        val share = folder.newFolder("Soulseek")
+        File(share, "song.flac").writeBytes(ByteArray(10))
+
+        FakeSoulseekServer().use { server ->
+            session(server, shareDirectory = share).use { session ->
+                session.connect()
+
+                peerTo(server, "downloader").use { socket ->
+                    Framing.PEER.write(
+                        socket.getOutputStream(),
+                        QueueUpload.CODE,
+                        QueueUpload.request("Soulseek\\nope.flac"),
+                    )
+
+                    val reply = Framing.PEER.read(socket.getInputStream())
+                    assertEquals(UploadDenied.CODE, reply.code)
+                    assertEquals("Soulseek\\nope.flac", UploadDenied.parse(reply.body).filename)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `a queue upload cannot escape the share folder`() {
+        val share = folder.newFolder("Soulseek")
+        File(share, "song.flac").writeBytes(ByteArray(10))
+
+        // Real file, outside the share: reachable only if the requested path were joined onto the
+        // share root instead of being matched against what we listed.
+        File(folder.root, "outside.flac").writeBytes(ByteArray(10))
+
+        FakeSoulseekServer().use { server ->
+            session(server, shareDirectory = share).use { session ->
+                session.connect()
+
+                peerTo(server, "downloader").use { socket ->
+                    Framing.PEER.write(
+                        socket.getOutputStream(),
+                        QueueUpload.CODE,
+                        QueueUpload.request("Soulseek\\..\\outside.flac"),
+                    )
+
+                    assertEquals(UploadDenied.CODE, Framing.PEER.read(socket.getInputStream()).code)
+                }
+            }
+        }
+    }
+
+    /** Dials the listener the session advertised and completes a peer handshake on it. */
+    private fun peerTo(server: FakeSoulseekServer, username: String): Socket {
+        val listenPort = MessageReader(server.await(SetWaitPort.CODE).body).readUInt32().toInt()
+
+        val socket = Socket(InetAddress.getLoopbackAddress(), listenPort)
+        socket.soTimeout = 5_000
+
+        Framing.PEER_INIT.write(
+            socket.getOutputStream(),
+            PeerInit.CODE,
+            MessageWriter()
+                .writeString(username)
+                .writeString(PeerInit.TYPE_PEER)
+                .writeUInt32(0)
+                .toByteArray(),
+        )
+
+        return socket
     }
 
     private fun session(

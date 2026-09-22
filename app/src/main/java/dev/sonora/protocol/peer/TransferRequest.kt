@@ -1,6 +1,7 @@
 package dev.sonora.protocol.peer
 
 import dev.sonora.protocol.MessageReader
+import dev.sonora.protocol.MessageWriter
 
 /**
  * Peer code 40. Sent by a peer when it is ready to upload to us; we answer with a
@@ -17,6 +18,18 @@ object TransferRequest {
 
     /** Legacy: a download request. Superseded by [QueueUpload], but slskd still sends it. */
     const val DIRECTION_DOWNLOAD = 0L
+
+    /**
+     * Asks a peer to send us a file, or — the same shape — tells a peer we are ready to send one
+     * of ours. [DIRECTION_UPLOAD] either way; the field does not flip with who sends it.
+     */
+    fun request(token: Long, filename: String, size: Long): ByteArray =
+        MessageWriter()
+            .writeUInt32(DIRECTION_UPLOAD)
+            .writeUInt32(token)
+            .writeString(filename)
+            .writeUInt64(size)
+            .toByteArray()
 
     fun parse(body: ByteArray): FileTransferRequest {
         val reader = MessageReader(body)

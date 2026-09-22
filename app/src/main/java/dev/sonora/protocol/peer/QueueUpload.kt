@@ -1,5 +1,6 @@
 package dev.sonora.protocol.peer
 
+import dev.sonora.protocol.MessageReader
 import dev.sonora.protocol.MessageWriter
 
 /**
@@ -15,4 +16,6 @@ object QueueUpload {
 
     fun request(filename: String): ByteArray =
         MessageWriter().writeString(filename).toByteArray()
+
+    fun parse(body: ByteArray): String = MessageReader(body).readString().replace('/', '\\')
 }
