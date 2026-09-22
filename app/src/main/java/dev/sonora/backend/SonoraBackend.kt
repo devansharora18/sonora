@@ -243,7 +243,17 @@ object SonoraBackend {
      */
     fun deleteDownload(context: Context, track: LibraryTrack): Boolean {
         val file = track.file
-        val deleted = runCatching { file.delete() }.getOrDefault(false)
+        val location = MusicDirectory.resolve(context, _settings.value.downloadTreeUri)
+
+        val inChosenFolder = location.tree != null &&
+            file.parentFile?.absolutePath == location.directory.absolutePath
+
+        val deleted = if (inChosenFolder) {
+            deleteViaTree(context, location.tree, file.name)
+        } else {
+            runCatching { file.delete() }.getOrDefault(false)
+        }
+
         if (!deleted) return false
 
         // Nudges the media provider to drop its row for a file that is no longer there, instead of
@@ -253,6 +263,22 @@ object SonoraBackend {
         refreshLibrary(context)
         return true
     }
+
+    /**
+     * Deletes through the folder the user granted.
+     *
+     * A file the document provider created belongs to the provider, not to Sonora, so
+     * [File.delete] is refused — and that ownership is exactly what makes it survive an uninstall.
+     * The tree grant is what gives the app the right to remove it.
+     */
+    private fun deleteViaTree(context: Context, tree: Uri, name: String): Boolean = runCatching {
+        val document = DocumentsContract.buildDocumentUriUsingTree(
+            tree,
+            "${DocumentsContract.getTreeDocumentId(tree)}/$name",
+        )
+
+        DocumentsContract.deleteDocument(context.contentResolver, document)
+    }.getOrDefault(false)
 
     fun toggleLiked(context: Context, track: LibraryTrack) {
         editPlaylists(context) { Playlists.toggleLiked(it, track.file.absolutePath) }
