@@ -578,6 +578,9 @@ object SonoraBackend {
             val newSession = SoulseekSession(
                 username = username,
                 password = password,
+                // The download folder is also the share: Soulseek etiquette treats advertising
+                // nothing as leeching, and the files are already there and already the user's.
+                shareDirectory = MusicDirectory.resolve(context, _settings.value.downloadTreeUri).directory,
                 onTrace = { Log.d(TAG, it) },
             )
 

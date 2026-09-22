@@ -1,5 +1,6 @@
 package dev.sonora.protocol
 
+import dev.sonora.protocol.peer.FileAttributes
 import dev.sonora.protocol.peer.FileSearchResponse
 import dev.sonora.protocol.peer.FileTransfer
 import dev.sonora.protocol.peer.PeerInit
@@ -8,6 +9,10 @@ import dev.sonora.protocol.peer.PeerSession
 import dev.sonora.protocol.peer.PierceFireWall
 import dev.sonora.protocol.peer.QueueUpload
 import dev.sonora.protocol.peer.SearchResponse
+import dev.sonora.protocol.peer.SharedFile
+import dev.sonora.protocol.peer.SharedFileListRequest
+import dev.sonora.protocol.peer.SharedFileListResponse
+import dev.sonora.protocol.peer.SharedFolder
 import dev.sonora.protocol.peer.TransferRequest
 import dev.sonora.protocol.peer.TransferResponse
 import dev.sonora.protocol.peer.UploadDenied
@@ -212,7 +217,7 @@ class SoulseekSession(
         val executor = if (address.connectionType == PeerInit.TYPE_FILE) fileDials else dials
         executor.execute {
             try {
-                dialPeer(address) { onPeerMessage(address.username, it) }
+                dialPeer(address) { session, message -> onPeerMessage(session, message) }
             } catch (e: Exception) {
                 // Sockets closed by our own shutdown are not failures — without this guard the
                 // trace is dominated by shutdown noise and says nothing about peer health.
@@ -230,7 +235,7 @@ class SoulseekSession(
      * Dials a peer that asked for an indirect connection and completes the handshake. Runs on
      * its own thread so the server read loop keeps draining relays.
      */
-    private fun dialPeer(address: PeerAddress, onMessage: (Message) -> Unit) {
+    private fun dialPeer(address: PeerAddress, onMessage: (PeerSession, Message) -> Unit) {
         val socket = Socket()
         outboundPeers += socket
 
@@ -247,11 +252,11 @@ class SoulseekSession(
                 PierceFireWall.request(address.token),
             )
 
+            val session = PeerSession(address.username, address.connectionType, socket)
+
             if (address.connectionType == PeerInit.TYPE_FILE) {
                 // File connections use their own framing entirely, so they take a separate path.
-                handleFileConnection(
-                    PeerSession(address.username, address.connectionType, socket),
-                )
+                handleFileConnection(session)
                 return
             }
 
@@ -265,7 +270,7 @@ class SoulseekSession(
                 } catch (_: SocketException) {
                     return // peer reset the connection, or we closed the socket on shutdown
                 }
-                onMessage(message)
+                onMessage(session, message)
             }
         } finally {
             outboundPeers -= socket
@@ -552,7 +557,7 @@ class SoulseekSession(
             try {
                 session.readTimeoutMillis = PEER_IDLE_TIMEOUT_MS
                 while (true) {
-                    onPeerMessage(session.username, session.read())
+                    onPeerMessage(session, session.read())
                 }
             } catch (_: Exception) {
                 // Idle timeout, peer hung up, or framing desync — all end this connection.
@@ -562,7 +567,7 @@ class SoulseekSession(
         }
     }
 
-    private fun onPeerMessage(peer: String, message: Message) {
+    private fun onPeerMessage(session: PeerSession, message: Message) {
         when (message.code) {
             FileSearchResponse.CODE -> {
                 // The body is untrusted, so a malformed one must not end the connection.
@@ -573,14 +578,66 @@ class SoulseekSession(
                 }
 
                 if (response != null) {
-                    onTrace("results ${response.files.size} from $peer")
+                    onTrace("results ${response.files.size} from ${session.username}")
                     searches[response.token]?.invoke(response)
                 }
             }
 
-            // Download and reshare messages land here once those exist.
+            SharedFileListRequest.CODE -> replyWithSharedFiles(session)
+
+            // Upload handling lands here once it exists.
             else -> Unit
         }
+    }
+
+    /**
+     * Answers a browse request with what we share.
+     *
+     * Failures are swallowed: a stranger asking for our file list must not be able to end the
+     * connection, and an unreadable share folder is a local problem rather than theirs.
+     */
+    private fun replyWithSharedFiles(session: PeerSession) {
+        val root = shareDirectory ?: return
+
+        val folders = runCatching { sharedFolders(root) }.getOrNull() ?: return
+        onTrace("browsed by ${session.username}: ${folders.size} folder(s)")
+
+        runCatching {
+            session.send(SharedFileListResponse.CODE, SharedFileListResponse.encode(folders))
+        }.onFailure {
+            onTrace("browse reply failed: ${it.javaClass.simpleName}")
+        }
+    }
+
+    /**
+     * The share, grouped the way a browse response wants it: one entry per folder, each listing
+     * the files directly inside it.
+     *
+     * Paths are virtual and use backslashes, rooted at the share folder's own name, so a peer
+     * sees `Soulseek\song.flac` rather than anything about where it really lives.
+     */
+    private fun sharedFolders(root: File): List<SharedFolder> {
+        if (!root.isDirectory) return emptyList()
+
+        return root.walkTopDown()
+            .filter { it.isDirectory }
+            .map { directory ->
+                val relative = directory.relativeTo(root).invariantSeparatorsPath
+                val virtual = if (relative.isEmpty()) {
+                    root.name
+                } else {
+                    "${root.name}\\${relative.replace('/', '\\')}"
+                }
+
+                val files = directory.listFiles().orEmpty()
+                    .filter { it.isFile }
+                    .sortedBy { it.name.lowercase() }
+                    .map { SharedFile(filename = it.name, size = it.length(), attributes = FileAttributes()) }
+
+                SharedFolder(virtual, files)
+            }
+            .filter { it.files.isNotEmpty() }
+            .toList()
     }
 
     override fun close() {

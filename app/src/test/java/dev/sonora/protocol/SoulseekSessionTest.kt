@@ -5,6 +5,8 @@ import dev.sonora.protocol.peer.PeerInit
 import dev.sonora.protocol.peer.PeerSession
 import dev.sonora.protocol.peer.SearchResponse
 import dev.sonora.protocol.peer.SearchWire
+import dev.sonora.protocol.peer.SharedFileListRequest
+import dev.sonora.protocol.peer.SharedFileListResponse
 import dev.sonora.protocol.peer.TransferRequest
 import dev.sonora.protocol.peer.TransferResponse
 import dev.sonora.protocol.server.FileSearch
@@ -13,6 +15,8 @@ import dev.sonora.protocol.server.SetStatus
 import dev.sonora.protocol.server.SetWaitPort
 import dev.sonora.protocol.server.SharedFoldersFiles
 import java.io.File
+import java.net.InetAddress
+import java.net.Socket
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -21,13 +25,18 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 
 /**
  * Drives [SoulseekSession] against [FakeSoulseekServer], so it is covered without credentials,
  * a network, or the live spike.
  */
 class SoulseekSessionTest {
+
+    @get:Rule
+    val folder = TemporaryFolder()
 
     @Test
     fun `connect logs in and performs the session handshake`() {
@@ -317,9 +326,71 @@ class SoulseekSessionTest {
         }
     }
 
+    /**
+     * A peer browses us: it connects to the listener the session advertised, asks for the file
+     * list, and gets one. This is the reshare read path end to end — the peer only ever sees
+     * virtual names, never the real path.
+     */
+    @Test
+    fun `answers a browse request with the shared folder`() {
+        val share = folder.newFolder("Soulseek")
+        File(share, "a.flac").writeBytes(ByteArray(1200))
+        File(share, "b.mp3").writeBytes(ByteArray(340))
+
+        FakeSoulseekServer().use { server ->
+            session(server, shareDirectory = share).use { session ->
+                session.connect()
+
+                // The session advertises the port its listener actually bound.
+                val listenPort = MessageReader(server.await(SetWaitPort.CODE).body).readUInt32().toInt()
+
+                Socket(InetAddress.getLoopbackAddress(), listenPort).use { socket ->
+                    socket.soTimeout = 5_000
+
+                    Framing.PEER_INIT.write(
+                        socket.getOutputStream(),
+                        PeerInit.CODE,
+                        MessageWriter()
+                            .writeString("browser")
+                            .writeString(PeerInit.TYPE_PEER)
+                            .writeUInt32(0)
+                            .toByteArray(),
+                    )
+
+                    Framing.PEER.write(socket.getOutputStream(), SharedFileListRequest.CODE, ByteArray(0))
+
+                    val reply = Framing.PEER.read(socket.getInputStream())
+                    assertEquals(SharedFileListResponse.CODE, reply.code)
+
+                    val reader = MessageReader(Zlib.decompress(reply.body))
+
+                    assertEquals(1L, reader.readUInt32())
+                    assertEquals("Soulseek", reader.readString())
+                    assertEquals(2L, reader.readUInt32())
+
+                    val names = buildList {
+                        repeat(2) {
+                            assertEquals(1, reader.readByte())
+                            add(reader.readString() to reader.readUInt64())
+                            reader.readUInt32() // obsolete extension
+                            repeat(reader.readUInt32().toInt()) {
+                                reader.readUInt32()
+                                reader.readUInt32()
+                            }
+                        }
+                    }
+
+                    assertEquals(listOf("a.flac", "b.mp3"), names.map { it.first })
+                    assertEquals(listOf(1200L, 340L), names.map { it.second })
+                }
+            }
+        }
+    }
+
     private fun session(
         server: FakeSoulseekServer,
         maxConcurrentPeers: Int = SoulseekSession.DEFAULT_MAX_CONCURRENT_PEERS,
+        shareDirectory: File? = null,
     ) = SoulseekSession(
         username = "test_user",
         password = "test_password",
@@ -328,6 +399,7 @@ class SoulseekSessionTest {
         // Ephemeral: the peer listener must not collide with anything on the test machine.
         listenPort = 0,
         maxConcurrentPeers = maxConcurrentPeers,
+        shareDirectory = shareDirectory,
     )
 
     private companion object {

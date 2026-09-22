@@ -2,6 +2,8 @@ package dev.sonora.protocol
 
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.util.zip.Deflater
+import java.util.zip.DeflaterOutputStream
 import java.util.zip.InflaterInputStream
 
 /**
@@ -19,6 +21,22 @@ object Zlib {
      * so unbounded inflation is a trivial memory-exhaustion vector. Matches Nicotine+'s limit.
      */
     const val MAX_DECOMPRESSED_BYTES = 128 * 1024 * 1024
+
+    /**
+     * Level 4, matching what Nicotine+ uses. The level is not part of the format — any valid
+     * zlib stream parses — but staying identical means a decompression difference is never the
+     * variable when something else misbehaves.
+     */
+    private const val COMPRESSION_LEVEL = 4
+
+    fun compress(bytes: ByteArray): ByteArray {
+        val out = ByteArrayOutputStream()
+
+        // `nowrap = false` keeps the zlib header and checksum, which the format requires.
+        DeflaterOutputStream(out, Deflater(COMPRESSION_LEVEL, false)).use { it.write(bytes) }
+
+        return out.toByteArray()
+    }
 
     fun decompress(bytes: ByteArray, maxBytes: Int = MAX_DECOMPRESSED_BYTES): ByteArray {
         val out = ByteArrayOutputStream()
