@@ -162,8 +162,7 @@ object SonoraBackend {
     }
 
     /** Records the folder the user picked for downloads, or null to go back to the default. */
-    fun setDownloadTree(context: Context, uri: String?) {
-        scope.launch {
+    fun setDownloadTree(context: Context, uri: String?) {        scope.launch {
             val updated = _settings.value.copy(
                 downloadTreeUri = uri,
                 promptedForDownloadFolder = true,
@@ -173,6 +172,17 @@ object SonoraBackend {
             settingsStore(context).save(updated)
             _settings.value = updated
             refreshLibrary(context)
+        }
+    }
+
+    /** Records the folder to reshare, or null to share the download folder instead. */
+    fun setShareTree(context: Context, uri: String?) {
+        scope.launch {
+            val updated = _settings.value.copy(shareTreeUri = uri)
+            if (updated == _settings.value) return@launch
+
+            settingsStore(context).save(updated)
+            _settings.value = updated
         }
     }
 
@@ -578,9 +588,13 @@ object SonoraBackend {
             val newSession = SoulseekSession(
                 username = username,
                 password = password,
-                // The download folder is also the share: Soulseek etiquette treats advertising
-                // nothing as leeching, and the files are already there and already the user's.
-                shareDirectory = MusicDirectory.resolve(context, _settings.value.downloadTreeUri).directory,
+                // The download folder is also the share by default: Soulseek etiquette treats
+                // advertising nothing as leeching, and the files are already there and already the
+                // user's.
+                shareDirectory = MusicDirectory.resolve(
+                    context,
+                    _settings.value.shareTreeUri ?: _settings.value.downloadTreeUri,
+                ).directory,
                 onTrace = { Log.d(TAG, it) },
             )
 

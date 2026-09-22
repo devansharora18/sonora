@@ -39,6 +39,13 @@ fun SettingsScreen() {
         MusicDirectory.resolve(context, settings.downloadTreeUri)
     }
 
+    val shared = remember(settings.shareTreeUri, settings.downloadTreeUri) {
+        MusicDirectory.resolve(
+            context,
+            settings.shareTreeUri ?: settings.downloadTreeUri,
+        )
+    }
+
     val pickFolder = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
@@ -52,6 +59,20 @@ fun SettingsScreen() {
                 )
             }
             SonoraBackend.setDownloadTree(context, uri.toString())
+        }
+    }
+
+    val pickShareFolder = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+            SonoraBackend.setShareTree(context, uri.toString())
         }
     }
 
@@ -138,6 +159,36 @@ fun SettingsScreen() {
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(top = 4.dp),
                 )
+            }
+        }
+
+        SectionTitle("Sharing")
+
+        Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+            Text("Shared folder", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = shared.directory.absolutePath,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "Other users can browse and download what is in here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+
+            Row(modifier = Modifier.padding(top = 8.dp)) {
+                TextButton(onClick = { pickShareFolder.launch(null) }) { Text("Choose folder") }
+
+                if (settings.shareTreeUri != null) {
+                    TextButton(
+                        onClick = { SonoraBackend.setShareTree(context, null) },
+                        modifier = Modifier.padding(start = 8.dp),
+                    ) {
+                        Text("Use downloads", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
         }
 

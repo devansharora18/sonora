@@ -107,12 +107,12 @@ because being *searchable* means participating in the distributed search network
 | S `93` | EmbeddedMessage | recv |
 | D `3` | DistribSearch | recv (and forward) |
 | D `4` / `5` | BranchLevel / BranchRoot | send/recv |
-| P `4` / `5` | SharedFileListRequest / Response | recv / send |
-| P `43` | QueueUpload | recv |
-| P `40` | TransferRequest (direction 1) | send |
-| P `41b` | TransferResponse (upload) | recv |
-| F | FileOffset | recv |
-| F | (raw bytes) | send |
+| P `4` / `5` | SharedFileListRequest / Response | recv / send | **done** |
+| P `43` | QueueUpload | recv | **done** |
+| P `40` | TransferRequest (direction 1) | send | **done** |
+| P `41b` | TransferResponse (upload) | recv | **done** |
+| F | FileOffset | recv | **done** |
+| F | (raw bytes) | send | **done** |
 
 **This is a milestone on its own.** Search requests from other users arrive through the
 distributed tree, so without distributed participation the app cannot be found and cannot
@@ -176,5 +176,25 @@ reshare. Recommend splitting reshare out of the initial spike.
    The live blocker was not NAT or file framing: the shared dial queue was saturated by search
    `P` relays, starving `F` relays. Sonora now gives file relays their own bounded pool.
 
-Reshare remains. It requires distributed search participation, shared-file-list responses, and
-upload handling; it is the next substantial protocol milestone.
+Reshare is **partly implemented**. Done and tested:
+
+- **Shared file list** (P `4`/`5`) — a peer can browse us; the reply is matched against the
+  files we enumerated, so a requested path cannot escape the share folder.
+- **Upload negotiation** (P `43` → P `40` → P `41b`) — a peer can ask for a file and we offer
+  it, or deny it when it is not shared.
+- **Upload transfer** (`F`) — we announce the transfer with the negotiated token, resume from
+  the offset the peer asks for, and stream the file.
+- **Share folder** — the download folder by default, overridable in Settings, and advertised
+  to the server so we are not counted as a leecher.
+
+Remaining, and it is the substantial part: **distributed search participation**
+(S `71`/`100`/`102`/`126`–`130`, `93`; D `3`/`4`/`5`). Uploads work, but peers find files
+through *search*, and a client only receives other users' searches if it joins the distributed
+tree. Until then resharing is reachable only by a peer who browses us by username.
+
+Also unimplemented: an upload **queue** (files are served immediately, with no slot accounting
+or place-in-queue reporting).
+
+Before starting distributed search, re-read the caution above. It is the one part of this
+protocol where a bug is felt by other people rather than by us: forwarding is what carries
+other users' searches, and a malformed forward is network noise at best.

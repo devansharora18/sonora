@@ -31,4 +31,12 @@ data class Settings(
      * default, which is nagging rather than helping.
      */
     val promptedForDownloadFolder: Boolean = false,
+
+    /**
+     * A folder to reshare, as a persisted tree URI.
+     *
+     * Null means the download folder, which is the sensible default: the files are already there
+     * and already the user's. Set only when someone wants to share something else.
+     */
+    val shareTreeUri: String? = null,
 )
