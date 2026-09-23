@@ -1,0 +1,63 @@
+{
+  "release-group-count": 10,
+  "release-groups": [
+    {
+      "secondary-type-ids": [],
+      "title": "HIT ME HARD AND SOFT",
+      "secondary-types": [],
+      "primary-type": "Album",
+      "first-release-date": "2024-05-17",
+      "disambiguation": "",
+      "id": "02a544b3-0459-42c7-bd9c-047162e7b67a",
+      "primary-type-id": "f529b476-6e62-324f-b0aa-1f3e33d313fc"
+    },
+    {
+      "id": "3ac5236a-3bd8-44c6-ab60-69b013594ae6",
+      "primary-type-id": "f529b476-6e62-324f-b0aa-1f3e33d313fc",
+      "secondary-type-ids": [],
+      "secondary-types": [],
+      "title": "Happier Than Ever",
+      "primary-type": "Album",
+      "disambiguation": "",
+      "first-release-date": "2021-07-30"
+    },
+    {
+      "primary-type": "Album",
+      "secondary-type-ids": [
+        "dd2a21e1-0c00-3729-a7a0-de60b84eb5d1"
+      ],
+      "secondary-types": [
+        "Compilation"
+      ],
+      "title": "eilish",
+      "disambiguation": "",
+      "first-release-date": "2017",
+      "id": "4d69483f-858d-46c3-8e02-760bb2bedd38",
+      "primary-type-id": "f529b476-6e62-324f-b0aa-1f3e33d313fc"
+    },
+    {
+      "primary-type-id": "f529b476-6e62-324f-b0aa-1f3e33d313fc",
+      "id": "72375978-a9a1-4254-b957-85565c716b7e",
+      "disambiguation": "",
+      "first-release-date": "2019-03-29",
+      "secondary-type-ids": [],
+      "primary-type": "Album",
+      "secondary-types": [],
+      "title": "WHEN WE ALL FALL ASLEEP, WHERE DO WE GO?"
+    },
+    {
+      "first-release-date": "2019-12-06",
+      "disambiguation": "",
+      "secondary-type-ids": [
+        "6fd474e2-6b58-3102-9d17-d6f7eb7da0a0"
+      ],
+      "secondary-types": [
+        "Live"
+      ],
+      "title": "Live at Third Man Records",
+      "primary-type": "Album",
+      "primary-type-id": "f529b476-6e62-324f-b0aa-1f3e33d313fc",
+      "id": "fbd079d3-ae70-49b1-847e-069033ee2a48"
+    }
+  ]
+}
