@@ -107,6 +107,9 @@ fun SonoraApp() {
             var tab by remember { mutableStateOf(MainTab.Home) }
             var playerOpen by remember { mutableStateOf(false) }
             var addTarget by remember { mutableStateOf<LibraryTrack?>(null) }
+
+            // Held here rather than inside the Library so a playlist card on Home can open it.
+            var openPlaylistId by remember { mutableStateOf<String?>(null) }
             val playback by SonoraPlayer.state.collectAsState()
             val playlists by SonoraBackend.playlists.collectAsState()
             val likedPaths = remember(playlists) { Playlists.likedPaths(playlists) }
@@ -158,6 +161,12 @@ fun SonoraApp() {
                                 tab = MainTab.Search
                                 SonoraBackend.search(context, term)
                             },
+                            onOpenPlaylist = { id ->
+                                // The same handoff in the other direction: the playlist is shown by
+                                // the Library, so go there and ask it for that one.
+                                openPlaylistId = id
+                                tab = MainTab.Library
+                            },
                         )
                         MainTab.Search -> SearchScreen()
                         MainTab.Library -> LibraryScreen(
@@ -165,6 +174,9 @@ fun SonoraApp() {
                                 tab = MainTab.Search
                                 SonoraBackend.search(context, term)
                             },
+                            openPlaylistId = openPlaylistId,
+                            onOpenPlaylist = { openPlaylistId = it },
+                            onClosePlaylist = { openPlaylistId = null },
                         )
                         MainTab.Settings -> SettingsScreen()
                     }
@@ -185,6 +197,10 @@ fun SonoraApp() {
                                 if (tab == entry && entry == MainTab.Search) {
                                     SonoraBackend.clearSearch()
                                 } else {
+                                    // Leaving the Library closes whatever it had open. That state
+                                    // used to live inside it and reset this way, and holding it up
+                                    // here should not change what the user sees.
+                                    if (entry != MainTab.Library) openPlaylistId = null
                                     tab = entry
                                 }
                             },

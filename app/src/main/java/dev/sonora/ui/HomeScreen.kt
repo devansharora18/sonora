@@ -59,7 +59,7 @@ import java.io.File
  * exists, but nothing yet says what is worth hearing — so these are things the user did.
  */
 @Composable
-fun HomeScreen(onRunSearch: (String) -> Unit) {
+fun HomeScreen(onRunSearch: (String) -> Unit, onOpenPlaylist: (String) -> Unit) {
     val context = LocalContext.current
     val tracks by SonoraBackend.library.collectAsState()
     val playlists by SonoraBackend.playlists.collectAsState()
@@ -134,7 +134,13 @@ fun HomeScreen(onRunSearch: (String) -> Unit) {
         }
 
         if (orderedPlaylists.isNotEmpty()) {
-            item { PlaylistsRow(playlists = orderedPlaylists, byPath = tracks) }
+            item {
+                PlaylistsRow(
+                    playlists = orderedPlaylists,
+                    byPath = tracks,
+                    onOpen = onOpenPlaylist,
+                )
+            }
         }
 
         if (history.isNotEmpty()) {
@@ -200,7 +206,11 @@ private fun Section(
 }
 
 @Composable
-private fun PlaylistsRow(playlists: List<Playlist>, byPath: List<LibraryTrack>) {
+private fun PlaylistsRow(
+    playlists: List<Playlist>,
+    byPath: List<LibraryTrack>,
+    onOpen: (String) -> Unit,
+) {
     val paths = remember(byPath) { byPath.mapTo(HashSet()) { it.file.absolutePath } }
 
     Column {
@@ -222,7 +232,7 @@ private fun PlaylistsRow(playlists: List<Playlist>, byPath: List<LibraryTrack>) 
                         if (count == 1) "1 track" else "$count tracks"
                     },
                     shape = if (liked) CircleShape else RoundedCornerShape(8.dp),
-                    onClick = { },
+                    onClick = { onOpen(playlist.id) },
                 )
             }
         }

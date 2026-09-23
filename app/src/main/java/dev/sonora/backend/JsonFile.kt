@@ -1,8 +1,6 @@
 package dev.sonora.backend
 
 import java.io.File
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 
@@ -39,8 +37,21 @@ internal class JsonFile<T>(
     fun write(value: T) {
         file.parentFile?.mkdirs()
 
-        val temporary = File(file.parentFile, "${file.name}.tmp")
-        temporary.writeText(json.encodeToString(serializer, value))
-        Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        // A name unique to this write, not a fixed "<name>.tmp". Two writers — the same track
+        // recorded twice, two tracks added at once — would otherwise share one temporary file: the
+        // first renames it away and the second fails moving something that is no longer there.
+        val temporary = File.createTempFile("${file.name}.", ".tmp", file.parentFile)
+
+        try {
+            temporary.writeText(json.encodeToString(serializer, value))
+
+            // renameTo, not Files.move: both are a rename underneath, but move() checks and unlinks
+            // an existing target first, which is a race two writers can lose. rename(2) replaces the
+            // target atomically and never looks at it.
+            temporary.renameTo(file)
+        } finally {
+            // Gone already if the rename succeeded; this covers a write that failed part-way.
+            temporary.delete()
+        }
     }
 }

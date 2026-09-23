@@ -69,14 +69,24 @@ private enum class LibrarySection(val label: String) {
 }
 
 @Composable
-fun LibraryScreen(onRunSearch: (String) -> Unit) {
+fun LibraryScreen(
+    onRunSearch: (String) -> Unit,
+    /**
+     * The playlist being shown, or null for the list.
+     *
+     * Held by the caller rather than here so that Home can open one: a card there is a playlist,
+     * and tapping it should land on the same screen the Library would have shown.
+     */
+    openPlaylistId: String?,
+    onOpenPlaylist: (String) -> Unit,
+    onClosePlaylist: () -> Unit,
+) {
     val context = LocalContext.current
     val tracks by SonoraBackend.library.collectAsState()
     val playlists by SonoraBackend.playlists.collectAsState()
     val playback by SonoraPlayer.state.collectAsState()
     var section by remember { mutableStateOf(LibrarySection.Tracks) }
     var creating by remember { mutableStateOf(false) }
-    var openPlaylistId by remember { mutableStateOf<String?>(null) }
     var openAlbum by remember { mutableStateOf<LibraryGrouping.Album?>(null) }
     var openArtist by remember { mutableStateOf<LibraryGrouping.Artist?>(null) }
     var addTarget by remember { mutableStateOf<LibraryTrack?>(null) }
@@ -134,11 +144,11 @@ fun LibraryScreen(onRunSearch: (String) -> Unit) {
     if (open != null) {
         val contents = open.trackPaths.mapNotNull { byPath[it] }
 
-        BackHandler { openPlaylistId = null }
+        BackHandler { onClosePlaylist() }
         PlaylistDetailScreen(
             playlist = open,
             tracks = contents,
-            onBack = { openPlaylistId = null },
+            onBack = { onClosePlaylist() },
             onPlayFrom = { index -> SonoraPlayer.play(context, contents, index) },
             onRemove = { track ->
                 SonoraBackend.removeFromPlaylist(context, open.id, track.file.absolutePath)
@@ -146,7 +156,7 @@ fun LibraryScreen(onRunSearch: (String) -> Unit) {
             onRename = { name -> SonoraBackend.renamePlaylist(context, open.id, name) },
             onDelete = {
                 SonoraBackend.deletePlaylist(context, open.id)
-                openPlaylistId = null
+                onClosePlaylist()
             },
         )
         return
@@ -218,7 +228,7 @@ fun LibraryScreen(onRunSearch: (String) -> Unit) {
                     playlists = playlists,
                     byPath = byPath,
                     onCreate = { creating = true },
-                    onOpen = { openPlaylistId = it.id },
+                    onOpen = { onOpenPlaylist(it.id) },
                 )
             }
         }
