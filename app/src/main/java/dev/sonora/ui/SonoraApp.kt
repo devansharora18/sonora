@@ -159,7 +159,12 @@ fun SonoraApp() {
                             },
                         )
                         MainTab.Search -> SearchScreen()
-                        MainTab.Library -> LibraryScreen()
+                        MainTab.Library -> LibraryScreen(
+                            onRunSearch = { term ->
+                                tab = MainTab.Search
+                                SonoraBackend.search(context, term)
+                            },
+                        )
                         MainTab.Settings -> SettingsScreen()
                     }
                 }

@@ -69,7 +69,7 @@ private enum class LibrarySection(val label: String) {
 }
 
 @Composable
-fun LibraryScreen() {
+fun LibraryScreen(onRunSearch: (String) -> Unit) {
     val context = LocalContext.current
     val tracks by SonoraBackend.library.collectAsState()
     val playlists by SonoraBackend.playlists.collectAsState()
@@ -111,6 +111,7 @@ fun LibraryScreen() {
             album = album,
             onBack = { openAlbum = null },
             onPlayFrom = { index -> SonoraPlayer.play(context, album.tracks, index) },
+            onFindMore = onRunSearch,
         )
         return
     }
@@ -123,6 +124,7 @@ fun LibraryScreen() {
             artist = artist,
             onBack = { openArtist = null },
             onPlayFrom = { index -> SonoraPlayer.play(context, artist.tracks, index) },
+            onFindMore = onRunSearch,
         )
         return
     }

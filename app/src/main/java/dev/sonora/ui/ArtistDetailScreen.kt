@@ -19,10 +19,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,6 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sonora.backend.LibraryGrouping
+import dev.sonora.backend.SearchQueries
 
 /** One artist's tracks, reached from the Artists list. */
 @Composable
@@ -37,6 +40,7 @@ fun ArtistDetailScreen(
     artist: LibraryGrouping.Artist,
     onBack: () -> Unit,
     onPlayFrom: (Int) -> Unit,
+    onFindMore: (String) -> Unit,
 ) {
     val albumCount = LibraryGrouping.albums(artist.tracks).size
 
@@ -101,19 +105,37 @@ fun ArtistDetailScreen(
             }
         }
 
-        IconButton(
-            onClick = { onPlayFrom(0) },
-            modifier = Modifier
-                .padding(start = 20.dp, top = 12.dp)
-                .size(56.dp)
-                .background(MaterialTheme.colorScheme.primary, CircleShape),
+        Row(
+            modifier = Modifier.padding(start = 20.dp, top = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                imageVector = Icons.Filled.PlayArrow,
-                contentDescription = "Play artist",
-                tint = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.size(32.dp),
-            )
+            IconButton(
+                onClick = { onPlayFrom(0) },
+                modifier = Modifier
+                    .size(56.dp)
+                    .background(MaterialTheme.colorScheme.primary, CircleShape),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.PlayArrow,
+                    contentDescription = "Play artist",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(32.dp),
+                )
+            }
+
+            // One album from an artist is exactly when you want the rest of them, so this is the
+            // most useful thing the screen can offer next to play.
+            TextButton(
+                onClick = { onFindMore(SearchQueries.forArtist(artist.name)) },
+                modifier = Modifier.padding(start = 8.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(text = "Find more", modifier = Modifier.padding(start = 8.dp))
+            }
         }
 
         LazyColumn(

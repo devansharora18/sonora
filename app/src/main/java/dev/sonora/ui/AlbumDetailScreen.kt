@@ -20,10 +20,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sonora.backend.LibraryGrouping
+import dev.sonora.backend.SearchQueries
 
 /** One album's tracks, reached from the Albums list. */
 @Composable
@@ -38,6 +41,7 @@ fun AlbumDetailScreen(
     album: LibraryGrouping.Album,
     onBack: () -> Unit,
     onPlayFrom: (Int) -> Unit,
+    onFindMore: (String) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -108,19 +112,37 @@ fun AlbumDetailScreen(
             }
         }
 
-        IconButton(
-            onClick = { onPlayFrom(0) },
-            modifier = Modifier
-                .padding(start = 20.dp, top = 12.dp)
-                .size(56.dp)
-                .background(MaterialTheme.colorScheme.primary, CircleShape),
+        Row(
+            modifier = Modifier.padding(start = 20.dp, top = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                imageVector = Icons.Filled.PlayArrow,
-                contentDescription = "Play album",
-                tint = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.size(32.dp),
-            )
+            IconButton(
+                onClick = { onPlayFrom(0) },
+                modifier = Modifier
+                    .size(56.dp)
+                    .background(MaterialTheme.colorScheme.primary, CircleShape),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.PlayArrow,
+                    contentDescription = "Play album",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(32.dp),
+                )
+            }
+
+            // The library is the only catalogue this app has, so "find more" is the bridge from
+            // what you own to what the network holds.
+            TextButton(
+                onClick = { onFindMore(SearchQueries.forAlbum(album.name, album.artist)) },
+                modifier = Modifier.padding(start = 8.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(text = "Find more", modifier = Modifier.padding(start = 8.dp))
+            }
         }
 
         LazyColumn(
