@@ -10,12 +10,14 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -58,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import dev.sonora.backend.DownloadState
 import dev.sonora.backend.SearchHit
 import dev.sonora.backend.SearchFolders
+import dev.sonora.backend.SearchQueries
 import dev.sonora.backend.SonoraBackend
 import dev.sonora.backend.SortMode
 import dev.sonora.ui.theme.accentText
@@ -70,6 +73,7 @@ fun SearchScreen() {
     val download by SonoraBackend.download.collectAsState()
     val settings by SonoraBackend.settings.collectAsState()
     val history by SonoraBackend.searchHistory.collectAsState()
+    val catalogue by SonoraBackend.catalogue.collectAsState()
 
     // Keyed on the committed query so clearing the search clears the box with it, rather than
     // leaving stale text above an empty result list.
@@ -217,6 +221,50 @@ fun SearchScreen() {
                     }
                 }
             } else {
+                // Registered even while empty. A row added to the top of a list that has already
+                // been laid out makes the list keep what was on top in place, which pushes the new
+                // row above the viewport — and this row always arrives after the search has begun.
+                item(key = "catalogue") {
+                    if (catalogue.isNotEmpty()) {
+                        Column(modifier = Modifier.padding(bottom = 8.dp)) {
+                            SectionHeader(
+                                title = "In the catalogue",
+                                subtitle = "From MusicBrainz; tap to look for it",
+                            )
+
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                items(catalogue, key = { it.id }) { album ->
+                                    MediaCard(
+                                        artwork = rememberCoverArt(album.id),
+                                        title = album.title,
+                                        // The artist is not decoration: one album title belongs to
+                                        // several different artists, and only this says which one
+                                        // this is.
+                                        subtitle = listOfNotNull(
+                                            album.artistName.ifEmpty { null },
+                                            album.year,
+                                        ).joinToString("  \u00b7  "),
+                                        shape = RoundedCornerShape(8.dp),
+                                        // Nothing here has been downloaded, so there is nothing to
+                                        // play; tapping looks for it on the network instead.
+                                        onClick = {
+                                            runSearch(
+                                                SearchQueries.forAlbum(
+                                                    album.title,
+                                                    album.artistName,
+                                                ),
+                                            )
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 items(searchState.hits, key = { it.peer + it.filename }) { hit ->
                     ResultRow(
                         hit = hit,

@@ -30,14 +30,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -45,30 +40,6 @@ import dev.sonora.backend.LibraryGrouping
 import dev.sonora.backend.SearchQueries
 import dev.sonora.backend.SonoraBackend
 import dev.sonora.metadata.ReleaseGroup
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-
-/**
- * Cover art for a catalogue release, loaded off the main thread and cached on disk.
- *
- * Nothing is drawn until it arrives, so a card without a cover shows the placeholder rather than
- * flashing one and replacing it.
- */
-@Composable
-private fun rememberCoverArt(releaseGroupId: String): ImageBitmap? {
-    val context = LocalContext.current
-    var artwork by remember(releaseGroupId) { mutableStateOf<ImageBitmap?>(null) }
-
-    LaunchedEffect(releaseGroupId) {
-        if (releaseGroupId.isEmpty()) return@LaunchedEffect
-
-        artwork = withContext(Dispatchers.IO) {
-            SonoraBackend.coverArt(context, releaseGroupId)
-        }
-    }
-
-    return artwork
-}
 
 /** One artist's tracks, reached from the Artists list. */
 @Composable

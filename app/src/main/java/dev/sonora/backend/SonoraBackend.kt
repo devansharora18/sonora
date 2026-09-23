@@ -122,6 +122,16 @@ object SonoraBackend {
 
     val missingAlbums: StateFlow<Map<String, List<ReleaseGroup>>> = _missingAlbums.asStateFlow()
 
+    /**
+     * What the catalogue knows by the name that was searched for.
+     *
+     * Separate from [search] because the two answer at completely different speeds — peers stream
+     * in over seconds, the catalogue answers in one request — and the faster one should not wait.
+     */
+    private val _catalogue = MutableStateFlow<List<ReleaseGroup>>(emptyList())
+
+    val catalogue: StateFlow<List<ReleaseGroup>> = _catalogue.asStateFlow()
+
     private var brainz: MusicBrainzClient? = null
 
     private var coverArt: CoverArtCache? = null
@@ -195,6 +205,7 @@ object SonoraBackend {
      */
     fun clearSearch() {
         _search.value = SearchState()
+        _catalogue.value = emptyList()
     }
 
     /**
@@ -400,12 +411,7 @@ object SonoraBackend {
         if (_missingAlbums.value.containsKey(artist)) return
 
         scope.launch {
-            val client = brainz ?: MusicBrainzClient(
-                store = MetadataStore(File(context.filesDir, METADATA_CACHE_DIRECTORY)),
-                fetch = MusicBrainzTransport(onTrace = { Log.d(TAG, "musicbrainz: $it") }),
-            ).also { brainz = it }
-
-            val releases = client.studioAlbums(artist)
+            val releases = musicBrainz(context).studioAlbums(artist)
             if (releases == null) {
                 Log.d(TAG, "musicbrainz: no discography for $artist")
                 return@launch
@@ -417,6 +423,28 @@ object SonoraBackend {
             _missingAlbums.update { it + (artist to missing) }
         }
     }
+
+    /**
+     * Looks up what the catalogue holds under the searched name, alongside the Soulseek search.
+     *
+     * Nothing is shown until the answer arrives, and an answer that arrives after a newer search
+     * has started is dropped rather than shown under the wrong query.
+     */
+    private fun loadCatalogue(context: Context, query: String) {
+        _catalogue.value = emptyList()
+
+        scope.launch {
+            val albums = musicBrainz(context).searchAlbums(query) ?: return@launch
+
+            if (_search.value.query == query) _catalogue.value = albums
+        }
+    }
+
+    private fun musicBrainz(context: Context): MusicBrainzClient =
+        brainz ?: MusicBrainzClient(
+            store = MetadataStore(File(context.filesDir, METADATA_CACHE_DIRECTORY)),
+            fetch = MusicBrainzTransport(onTrace = { Log.d(TAG, "musicbrainz: $it") }),
+        ).also { brainz = it }
 
     /**
      * Queues a search result for download.
@@ -594,7 +622,8 @@ object SonoraBackend {
      * Soulseek searches have no completion signal — peers simply stop replying — so [search] is
      * marked not-searching after a fixed window while late results keep being appended.
      */
-    fun search(context: Context, query: String) {        val current = session ?: return
+    fun search(context: Context, query: String) {
+        val current = session ?: return
         if (query.isBlank()) return
 
         val tokens = query.lowercase().split(WHITESPACE).filter { it.isNotEmpty() }
@@ -606,6 +635,7 @@ object SonoraBackend {
         Log.d(TAG, "searching: $query")
 
         recordSearch(context, query)
+        loadCatalogue(context, query)
 
         scope.launch {
             // The socket write must not happen on the caller's thread.

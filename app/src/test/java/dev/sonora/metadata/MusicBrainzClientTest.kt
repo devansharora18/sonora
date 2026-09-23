@@ -130,6 +130,86 @@ class MusicBrainzSearchTest {
         javaClass.getResourceAsStream("/musicbrainz/release-search.json"),
     ).bufferedReader().readText()
 
+    /** The real discography response for Billie Eilish, trimmed to keep the file small. */
+    private val discography: String = checkNotNull(
+        javaClass.getResourceAsStream("/musicbrainz/release-groups.json"),
+    ).bufferedReader().readText()
+
+    private val billieEilish = """{"artists":[{"id":"f4abc0b5","name":"Billie Eilish"}]}"""
+
+    @Test
+    fun `an artist name brings that artist's albums`() {
+        val albums = clientFor { url ->
+            when {
+                url.contains("/artist?") -> billieEilish
+                url.contains("release-group?artist=") -> discography
+                else -> releaseSearch
+            }
+        }.searchAlbums("Billie Eilish")
+
+        assertEquals(
+            listOf("HIT ME HARD AND SOFT", "Happier Than Ever", "WHEN WE ALL FALL ASLEEP, WHERE DO WE GO?"),
+            albums?.map { it.title },
+        )
+    }
+
+    @Test
+    fun `another artist is not substituted when the query is a title`() {
+        // MusicBrainz answers an artist lookup for "Happier Than Ever" with "More Than Ever", at
+        // full marks, so only an exact name match may count for anything.
+        val albums = clientFor { url ->
+            when {
+                url.contains("/artist?") -> """{"artists":[{"id":"nope","name":"More Than Ever"}]}"""
+                url.contains("release-group?artist=") -> error("another artist's discography was fetched")
+                else -> releaseSearch
+            }
+        }.searchAlbums("Happier Than Ever")
+
+        assertEquals(listOf("Happier Than Ever"), albums?.map { it.title })
+    }
+
+    @Test
+    fun `an artist is only used when the name matches exactly`() {
+        val nearMiss = """{"artists":[{"id":"x","name":"More Than Ever"}]}"""
+
+        assertNull(MusicBrainz.parseNamedArtist(nearMiss, "Happier Than Ever"))
+        assertEquals("x", MusicBrainz.parseNamedArtist(nearMiss, "more than ever")?.id)
+    }
+
+    @Test
+    fun `an artist's albums say whose they are`() {
+        // A discography does not repeat the artist, so tapping one of these could otherwise only
+        // search for the album title on its own.
+        val albums = clientFor { url ->
+            when {
+                url.contains("/artist?") -> billieEilish
+                else -> discography
+            }
+        }.searchAlbums("Billie Eilish")
+
+        assertEquals(listOf("Billie Eilish"), albums?.map { it.artistName }?.distinct())
+    }
+
+    @Test
+    fun `an album is not listed twice when the artist is named after it`() {
+        // A self-titled record: the query names the artist and is also the title of one of their
+        // albums, so both paths find the same release.
+        val selfTitled =
+            """{"release-groups":[{"id":"rg1","title":"Weezer","primary-type":"Album","secondary-types":[]}]}"""
+
+        val albums = clientFor { url ->
+            when {
+                url.contains("/artist?") -> """{"artists":[{"id":"a","name":"Weezer"}]}"""
+                else -> selfTitled
+            }
+        }.searchAlbums("Weezer")
+
+        assertEquals(1, albums?.size)
+    }
+
+    private fun clientFor(fetch: (String) -> String?): MusicBrainzClient =
+        MusicBrainzClient(MetadataStore(folder.newFolder()), fetch)
+
     @Test
     fun `a search finds the album and not the look-alikes`() {
         // The response also holds a compilation, a remix set, "Happier Than Everybody Else" and
@@ -185,13 +265,15 @@ class MusicBrainzSearchTest {
     @Test
     fun `a search is fetched once and then served from the cache`() {
         var fetches = 0
-        val client = MusicBrainzClient(MetadataStore(folder.newFolder())) { fetches++; releaseSearch }
+        val client = clientFor { fetches++; releaseSearch }
 
         val first = client.searchAlbums("Happier Than Ever")
+        val afterFirst = fetches
         client.searchAlbums("Happier Than Ever")
 
         assertEquals(listOf("Happier Than Ever"), first?.map { it.title })
-        assertEquals(1, fetches)
+        assertEquals("the title search and the artist lookup, once each", 2, afterFirst)
+        assertEquals("and nothing at all the second time", afterFirst, fetches)
     }
 
     @Test

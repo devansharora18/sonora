@@ -20,28 +20,57 @@ class MusicBrainzClient(
      * Two requests at most, and none at all once both are cached: an artist's identifier does not
      * change, and their discography changes when they release something.
      */
-    fun studioAlbums(artist: String): List<ReleaseGroup>? {
-        val artistId = cached(MusicBrainz.artistSearchUrl(artist), TTL_ARTIST_ID)?.let {
-            MusicBrainz.parseArtistId(it)
-        } ?: return null
-
-        val discography = cached(MusicBrainz.discographyUrl(artistId), TTL_DISCOGRAPHY)
-            ?: return null
-
-        return MusicBrainz.parseStudioAlbums(discography)
-    }
+    fun studioAlbums(artist: String): List<ReleaseGroup>? =
+        artistFor(artist, exactName = false)?.let(::discographyOf)
 
     /**
      * Studio albums matching [query], or null when MusicBrainz could not be reached.
      *
-     * One request, and none at all once that query has been searched: the catalogue changes
-     * slowly, so an answer kept is an answer not fetched again.
+     * One title search, cached, plus an artist lookup when the query is somebody's name.
+     *
+     * An artist's albums come first because the query named them: an album *titled* with an artist's
+     * name is usually a tribute to that artist rather than their own record, so the title matches
+     * are the weaker answer and belong underneath.
      */
     fun searchAlbums(query: String): List<ReleaseGroup>? {
-        val body = cached(MusicBrainz.releaseSearchUrl(query), TTL_SEARCH) ?: return null
+        val byTitle = cached(MusicBrainz.releaseSearchUrl(query), TTL_SEARCH)?.let {
+            MusicBrainz.parseReleases(it, query)
+        } ?: return null
 
-        return MusicBrainz.parseReleases(body, query)
+        val byArtist = artistFor(query, exactName = true)?.let(::discographyOf).orEmpty()
+
+        return (byArtist + byTitle).distinctBy { it.id }
     }
+
+    /**
+     * An artist for a name.
+     *
+     * Two callers want different things from the same lookup. A library artist name is best-effort:
+     * the tag may read "Billie Eilish feat. Khalid", and refusing to look that up would lose the
+     * discography. A search box is not: there the name has to match, or the albums belong to
+     * somebody else.
+     */
+    private fun artistFor(name: String, exactName: Boolean): Artist? {
+        val body = cached(MusicBrainz.artistSearchUrl(name), TTL_ARTIST_ID) ?: return null
+
+        return if (exactName) {
+            MusicBrainz.parseNamedArtist(body, name)
+        } else {
+            MusicBrainz.parseArtist(body)
+        }
+    }
+
+    /**
+     * An artist's albums.
+     *
+     * The response does not repeat who they are by — a discography is asked for by artist, so the
+     * credit is implied. Filling it in is what makes these albums say whose they are, the way a
+     * search result does; without it, tapping one could only search for the album title alone.
+     */
+    private fun discographyOf(artist: Artist): List<ReleaseGroup>? =
+        cached(MusicBrainz.discographyUrl(artist.id), TTL_DISCOGRAPHY)
+            ?.let(MusicBrainz::parseStudioAlbums)
+            ?.map { it.copy(artistCredit = listOf(ArtistCredit(artist.name))) }
 
     /**
      * Cache first, then network.

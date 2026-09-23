@@ -11,6 +11,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
+import dev.sonora.backend.SonoraBackend
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
@@ -26,6 +28,9 @@ import kotlinx.coroutines.withContext
  */
 private val artworkCache = ConcurrentHashMap<String, ImageBitmap?>()
 
+/** Catalogue covers, held the same way and for the same reason: the row re-composes as it scrolls. */
+private val coverArtCache = ConcurrentHashMap<String, ImageBitmap?>()
+
 @Composable
 fun rememberArtwork(file: File): ImageBitmap? {
     var artwork by remember(file) { mutableStateOf(artworkCache[file.absolutePath]) }
@@ -37,6 +42,32 @@ fun rememberArtwork(file: File): ImageBitmap? {
         if (loaded != null) {
             artworkCache[file.absolutePath] = loaded
         }
+        artwork = loaded
+    }
+
+    return artwork
+}
+
+/**
+ * Cover art for a catalogue release, fetched once and kept in memory.
+ *
+ * Separate from [rememberArtwork] because there is no file to read: this is a release MusicBrainz
+ * knows about and nothing has been downloaded. Nothing is drawn until it arrives, so a card without
+ * a cover shows the placeholder rather than flashing one and replacing it.
+ */
+@Composable
+internal fun rememberCoverArt(releaseGroupId: String): ImageBitmap? {
+    val context = LocalContext.current
+    var artwork by remember(releaseGroupId) { mutableStateOf(coverArtCache[releaseGroupId]) }
+
+    LaunchedEffect(releaseGroupId) {
+        if (releaseGroupId.isEmpty()) return@LaunchedEffect
+        if (coverArtCache.containsKey(releaseGroupId)) return@LaunchedEffect
+
+        val loaded = withContext(Dispatchers.IO) {
+            SonoraBackend.coverArt(context, releaseGroupId)
+        }
+        coverArtCache[releaseGroupId] = loaded
         artwork = loaded
     }
 

@@ -49,9 +49,27 @@ object MusicBrainz {
     fun releaseSearchUrl(query: String): String =
         "$BASE/release-group?query=${encode("$query AND primarytype:album")}&limit=10&fmt=json"
 
-    fun parseArtistId(body: String): String? = runCatching {
-        json.decodeFromString<ArtistPage>(body).artists.firstOrNull()?.id
+    /** The best-matching artist for a name, as MusicBrainz ranks them. */
+    fun parseArtist(body: String): Artist? = runCatching {
+        json.decodeFromString<ArtistPage>(body).artists.firstOrNull()
     }.getOrNull()
+
+    /**
+     * The artist whose name is exactly [name], or null.
+     *
+     * The score cannot stand in for this check. MusicBrainz scores a near miss as highly as an exact
+     * hit — an artist lookup for "Happier Than Ever" answers "More Than Ever" at full marks — so
+     * comparing the names is the only thing that keeps one artist's albums out of another's search.
+     */
+    fun parseNamedArtist(body: String, name: String): Artist? {
+        val wanted = words(name)
+        if (wanted.isEmpty()) return null
+
+        return runCatching {
+            json.decodeFromString<ArtistPage>(body).artists
+                .firstOrNull { words(it.name) == wanted }
+        }.getOrNull()
+    }
 
     /**
      * The studio albums whose title answers the query, best match first.
