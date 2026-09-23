@@ -49,4 +49,25 @@ class SearchHistoryTest {
         // The oldest entry, "query 1", is the one pushed out.
         assertEquals("query ${SearchHistory.MAX - 1}", recorded.last())
     }
+
+    @Test
+    fun `removing a query drops only that one`() {
+        val history = listOf("third", "second", "first")
+
+        assertEquals(listOf("third", "first"), SearchHistory.remove(history, "second"))
+    }
+
+    @Test
+    fun `removing matches case-insensitively, like recording does`() {
+        val history = listOf("Ocean Eyes", "other")
+
+        assertEquals(listOf("other"), SearchHistory.remove(history, "ocean eyes"))
+    }
+
+    @Test
+    fun `removing something absent changes nothing`() {
+        val history = listOf("ocean eyes")
+
+        assertEquals(history, SearchHistory.remove(history, "never searched"))
+    }
 }

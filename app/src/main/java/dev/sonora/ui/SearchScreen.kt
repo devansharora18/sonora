@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -185,15 +186,34 @@ fun SearchScreen() {
                     item { Note("Search the Soulseek network to find music.") }
                 } else {
                     item {
-                        Text(
-                            text = "Recent searches",
-                            style = MaterialTheme.typography.titleSmall,
-                            modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 4.dp),
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "Recent searches",
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            TextButton(
+                                onClick = { SonoraBackend.clearSearchHistory(context) },
+                            ) {
+                                Text(
+                                    text = "Clear all",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                     }
 
                     items(history, key = { it }) { term ->
-                        RecentSearchRow(term = term, onClick = { runSearch(term) })
+                        RecentSearchRow(
+                            term = term,
+                            onClick = { runSearch(term) },
+                            onRemove = { SonoraBackend.removeSearchQuery(context, term) },
+                        )
                     }
                 }
             } else {
@@ -295,12 +315,12 @@ private fun SearchBar(
 }
 
 @Composable
-private fun RecentSearchRow(term: String, onClick: () -> Unit) {
+private fun RecentSearchRow(term: String, onClick: () -> Unit, onRemove: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(start = 20.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
@@ -314,8 +334,17 @@ private fun RecentSearchRow(term: String, onClick: () -> Unit) {
             style = MaterialTheme.typography.bodyLarge,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 14.dp),
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 14.dp, top = 12.dp, bottom = 12.dp),
         )
+        IconButton(onClick = onRemove) {
+            Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Remove ${term}",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

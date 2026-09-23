@@ -580,8 +580,22 @@ object SonoraBackend {
 
     /** Remembers a query so the search screen can offer it again. */
     private fun recordSearch(context: Context, query: String) {
+        editSearchHistory(context) { SearchHistory.record(it, query) }
+    }
+
+    /** Forgets one query. */
+    fun removeSearchQuery(context: Context, query: String) {
+        editSearchHistory(context) { SearchHistory.remove(it, query) }
+    }
+
+    /** Forgets every query. */
+    fun clearSearchHistory(context: Context) {
+        editSearchHistory(context) { emptyList() }
+    }
+
+    private fun editSearchHistory(context: Context, edit: (List<String>) -> List<String>) {
         scope.launch {
-            val updated = SearchHistory.record(_searchHistory.value, query)
+            val updated = edit(_searchHistory.value)
             if (updated == _searchHistory.value) return@launch
 
             searchHistoryStore(context).save(updated)

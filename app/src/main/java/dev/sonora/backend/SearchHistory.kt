@@ -23,4 +23,8 @@ object SearchHistory {
         return (listOf(trimmed) + history.filterNot { it.equals(trimmed, ignoreCase = true) })
             .take(MAX)
     }
+
+    /** Forgets one query, matching it the same way [record] does. */
+    fun remove(history: List<String>, query: String): List<String> =
+        history.filterNot { it.equals(query, ignoreCase = true) }
 }
