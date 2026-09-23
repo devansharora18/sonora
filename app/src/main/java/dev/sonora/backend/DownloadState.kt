@@ -10,6 +10,8 @@ sealed interface DownloadState {
         val peer: String,
         val bytes: Long,
         val totalBytes: Long,
+        /** How many more are waiting behind this one, so a bulk download can report its depth. */
+        val remaining: Int = 0,
     ) : DownloadState {
         /** Null when the size is unknown, so the UI can show an indeterminate bar. */
         val fraction: Float? get() = if (totalBytes > 0) bytes.toFloat() / totalBytes else null

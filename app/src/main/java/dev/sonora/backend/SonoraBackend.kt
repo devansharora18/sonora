@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
  * Owns the Soulseek session and publishes its state to the UI.
@@ -75,6 +76,13 @@ object SonoraBackend {
     private val _download = MutableStateFlow<DownloadState>(DownloadState.Idle)
 
     val download: StateFlow<DownloadState> = _download.asStateFlow()
+
+    /** Results waiting their turn, in the order they were asked for. */
+    private val pending = ConcurrentLinkedQueue<SearchHit>()
+
+    /** True while a worker is draining [pending]. */
+    @Volatile
+    private var draining = false
 
     private val _library = MutableStateFlow<List<LibraryTrack>>(emptyList())
 
@@ -339,20 +347,34 @@ object SonoraBackend {
         SearchHistoryStore(File(context.filesDir, SEARCH_HISTORY_FILE))
 
     /**
-     * Downloads one search result.
+     * Queues a search result for download.
      *
-     * One at a time for now: concurrent transfers need their own queueing and progress story,
-     * and a single download is what the flow needs to work first.
-     *
-     * When the user has chosen a folder, the bytes are written to a scratch file first and then
-     * copied into that folder through the document provider. The extra copy buys the one thing that
-     * matters here: a file the provider created is not attributed to Sonora, so uninstalling the
-     * app does not delete the user's music. It also keeps the transfer layer writing to a plain
-     * file, which is what its progress reporting and resume logic already assume.
+     * Queued rather than refused when something is already transferring, so a bulk request can
+     * hand over a batch and let it drain. Still one transfer at a time: parallel transfers need
+     * their own slot accounting, and peers queue us anyway.
      */
     fun download(context: Context, hit: SearchHit) {
+        if (session == null) return
+
+        pending += hit
+        if (draining) return
+
+        draining = true
+        scope.launch {
+            try {
+                while (true) {
+                    val next = pending.poll() ?: break
+                    transfer(context, next)
+                }
+            } finally {
+                draining = false
+            }
+        }
+    }
+
+    /** Runs one transfer to completion, reporting progress and the outcome. */
+    private suspend fun transfer(context: Context, hit: SearchHit) {
         val current = session ?: return
-        if (_download.value is DownloadState.Downloading) return
 
         val location = MusicDirectory.resolve(context, _settings.value.downloadTreeUri)
         val directory = location.directory.apply { mkdirs() }
@@ -369,62 +391,61 @@ object SonoraBackend {
             peer = hit.peer,
             bytes = 0,
             totalBytes = hit.size,
+            remaining = pending.size,
         )
 
-        scope.launch {
-            // The session reports no progress, so poll the file being written. Cheap, and it
-            // avoids threading a callback through the transfer layer for a UI concern.
-            val progress = launch {
-                while (isActive) {
-                    delay(PROGRESS_POLL_MS)
-                    _download.update { state ->
-                        if (state is DownloadState.Downloading) {
-                            state.copy(bytes = scratch.length())
-                        } else {
-                            state
-                        }
+        // The session reports no progress, so poll the file being written. Cheap, and it
+        // avoids threading a callback through the transfer layer for a UI concern.
+        val progress = scope.launch {
+            while (isActive) {
+                delay(PROGRESS_POLL_MS)
+                _download.update { state ->
+                    if (state is DownloadState.Downloading) {
+                        state.copy(bytes = scratch.length(), remaining = pending.size)
+                    } else {
+                        state
                     }
                 }
             }
+        }
 
-            val outcome = current.download(hit.peer, hit.filename, scratch, hit.size)
-            progress.cancel()
+        val outcome = current.download(hit.peer, hit.filename, scratch, hit.size)
+        progress.cancel()
 
-            val published = if (outcome is DownloadOutcome.Completed && location.tree != null) {
-                val moved = runCatching {
-                    copyIntoTree(context, location.tree, scratch, name)
-                }.getOrNull()
+        val published = if (outcome is DownloadOutcome.Completed && location.tree != null) {
+            val moved = runCatching {
+                copyIntoTree(context, location.tree, scratch, name)
+            }.getOrNull()
 
-                scratch.delete()
-                moved != null
+            scratch.delete()
+            moved != null
+        } else {
+            true
+        }
+
+        val target = File(directory, name)
+
+        _download.value = when (outcome) {
+            is DownloadOutcome.Failed -> DownloadState.Failed(name, outcome.reason)
+
+            is DownloadOutcome.Completed -> if (published) {
+                DownloadState.Completed(name, outcome.bytes, target.absolutePath)
             } else {
-                true
+                DownloadState.Failed(name, "could not write to the chosen folder")
             }
+        }
 
-            val target = File(directory, name)
+        if (outcome is DownloadOutcome.Completed && published) {
+            // Shared storage is scanned by the media provider, not by us: without this the file
+            // exists but is invisible to every other player and to the system's own music apps.
+            MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), null, null)
 
-            _download.value = when (outcome) {
-                is DownloadOutcome.Failed -> DownloadState.Failed(name, outcome.reason)
+            // What we share just changed, and the server is what tells other users. Left until
+            // the next connect, a peer would still see the old — possibly zero — count and
+            // refuse to upload to us.
+            current.advertiseShares()
 
-                is DownloadOutcome.Completed -> if (published) {
-                    DownloadState.Completed(name, outcome.bytes, target.absolutePath)
-                } else {
-                    DownloadState.Failed(name, "could not write to the chosen folder")
-                }
-            }
-
-            if (outcome is DownloadOutcome.Completed && published) {
-                // Shared storage is scanned by the media provider, not by us: without this the file
-                // exists but is invisible to every other player and to the system's own music apps.
-                MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), null, null)
-
-                // What we share just changed, and the server is what tells other users. Left until
-                // the next connect, a peer would still see the old — possibly zero — count and
-                // refuse to upload to us.
-                current.advertiseShares()
-
-                refreshLibrary(context)
-            }
+            refreshLibrary(context)
         }
     }
 

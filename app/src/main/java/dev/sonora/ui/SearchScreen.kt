@@ -23,12 +23,15 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -53,6 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sonora.backend.DownloadState
 import dev.sonora.backend.SearchHit
+import dev.sonora.backend.SearchFolders
 import dev.sonora.backend.SonoraBackend
 import dev.sonora.backend.SortMode
 import dev.sonora.ui.theme.accentText
@@ -191,7 +195,15 @@ fun SearchScreen() {
                 }
             } else {
                 items(searchState.hits, key = { it.peer + it.filename }) { hit ->
-                    ResultRow(hit, onDownload = { startDownload(hit) })
+                    ResultRow(
+                        hit = hit,
+                        folderSize = SearchFolders.folderOf(searchState.hits, hit).size,
+                        onDownload = { startDownload(hit) },
+                        onDownloadFolder = {
+                            SearchFolders.folderOf(searchState.hits, hit)
+                                .forEach { startDownload(it) }
+                        },
+                    )
                 }
             }
         }
@@ -315,7 +327,12 @@ private fun Note(text: String) {
 }
 
 @Composable
-private fun ResultRow(hit: SearchHit, onDownload: () -> Unit) {
+private fun ResultRow(
+    hit: SearchHit,
+    folderSize: Int,
+    onDownload: () -> Unit,
+    onDownloadFolder: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -412,6 +429,40 @@ private fun ResultRow(hit: SearchHit, onDownload: () -> Unit) {
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+
+        // Bulk download sits behind a menu: it acts on other results too, so it should not look
+        // like the button that fetches this one.
+        var menuOpen by remember { mutableStateOf(false) }
+
+        Box {
+            IconButton(onClick = { menuOpen = true }) {
+                Icon(
+                    imageVector = Icons.Filled.MoreVert,
+                    contentDescription = "Result options",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("Download this file") },
+                    onClick = {
+                        menuOpen = false
+                        onDownload()
+                    },
+                )
+
+                if (folderSize > 1) {
+                    DropdownMenuItem(
+                        text = { Text("Download folder ($folderSize files)") },
+                        onClick = {
+                            menuOpen = false
+                            onDownloadFolder()
+                        },
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -422,8 +473,11 @@ private fun DownloadStatus(state: DownloadState) {
 
         is DownloadState.Downloading -> Column(modifier = Modifier.padding(horizontal = 16.dp)) {
             Text(
-                text = "Downloading ${state.filename} \u2014 " +
-                    (state.fraction?.let { "${(it * 100).toInt()}%" } ?: formatSize(state.bytes)),
+                text = buildString {
+                    append("Downloading ${state.filename} \u2014 ")
+                    append(state.fraction?.let { "${(it * 100).toInt()}%" } ?: formatSize(state.bytes))
+                    if (state.remaining > 0) append("  \u00b7  ${state.remaining} queued")
+                },
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
