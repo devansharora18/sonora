@@ -61,23 +61,34 @@ import dev.sonora.ui.theme.onSurfaceFaint
 @Composable
 fun SearchScreen() {
     val context = LocalContext.current
-    val state by SonoraBackend.search.collectAsState()
+    val searchState by SonoraBackend.search.collectAsState()
     val download by SonoraBackend.download.collectAsState()
     val settings by SonoraBackend.settings.collectAsState()
-    var query by remember { mutableStateOf("") }
+    val history by SonoraBackend.searchHistory.collectAsState()
+
+    // Keyed on the committed query so clearing the search clears the box with it, rather than
+    // leaving stale text above an empty result list.
+    var query by remember(searchState.query) { mutableStateOf(searchState.query) }
+    fun runSearch(term: String) {
+        query = term
+        if (term.isNotBlank()) SonoraBackend.search(context, term.trim())
+    }
 
     // YT Music's sort control, and a *fastest* source is exactly what a P2P result list needs:
     // without it you pick a peer at random and wait.
-    val sort = state.sort
+    val sort = searchState.sort
     fun onSort(mode: SortMode) = SonoraBackend.setSort(mode)
+
+    // Nothing searched yet: the recent queries are the useful thing to show, rather than an
+    // instruction to go and do something.
+    val showingHistory = searchState.query.isBlank() && !searchState.searching
 
     // Asked once, before the first download. Where the files land decides whether they survive
     // uninstalling the app, so it is worth one question rather than a silent default.
     var askingWhere by remember { mutableStateOf(false) }
     var waiting by remember { mutableStateOf<SearchHit?>(null) }
 
-    val pickFolder = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree(),
+    val pickFolder = rememberLauncherForActivityResult(        ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
         if (uri != null) {
             runCatching {
@@ -114,10 +125,10 @@ fun SearchScreen() {
         SearchBar(
             query = query,
             onQueryChange = { query = it },
-            onSearch = { SonoraBackend.search(query.trim()) },
+            onSearch = { SonoraBackend.search(context, query.trim()) },
         )
 
-        if (state.hits.isNotEmpty() || state.searching) {
+        if (searchState.hits.isNotEmpty() || searchState.searching) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -152,18 +163,36 @@ fun SearchScreen() {
         DownloadStatus(download)
 
         when {
-            state.searching -> Note("Searching\u2026 ${state.matched} match(es) so far")
+            searchState.searching -> Note("Searching\u2026 ${searchState.matched} match(es) so far")
 
-            state.query.isBlank() -> Note("Search the Soulseek network to find music.")
+            showingHistory -> Unit
 
-            state.hits.isEmpty() -> Note("No results for \u201c${state.query}\u201d.")
+            searchState.hits.isEmpty() -> Note("No results for \u201c${searchState.query}\u201d.")
 
-            else -> Note("${state.matched} match(es) from ${state.peers} peer(s)")
+            else -> Note("${searchState.matched} match(es) from ${searchState.peers} peer(s)")
         }
 
         LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(state.hits, key = { it.peer + it.filename }) { hit ->
-                ResultRow(hit, onDownload = { startDownload(hit) })
+            if (showingHistory) {
+                if (history.isEmpty()) {
+                    item { Note("Search the Soulseek network to find music.") }
+                } else {
+                    item {
+                        Text(
+                            text = "Recent searches",
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 4.dp),
+                        )
+                    }
+
+                    items(history, key = { it }) { term ->
+                        RecentSearchRow(term = term, onClick = { runSearch(term) })
+                    }
+                }
+            } else {
+                items(searchState.hits, key = { it.peer + it.filename }) { hit ->
+                    ResultRow(hit, onDownload = { startDownload(hit) })
+                }
             }
         }
     }
@@ -248,6 +277,31 @@ private fun SearchBar(
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 8.dp),
     )
+}
+
+@Composable
+private fun RecentSearchRow(term: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Search,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+        Text(
+            text = term,
+            style = MaterialTheme.typography.bodyLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 14.dp),
+        )
+    }
 }
 
 @Composable

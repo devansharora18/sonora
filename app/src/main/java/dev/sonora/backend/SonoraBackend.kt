@@ -56,6 +56,7 @@ object SonoraBackend {
 
     private const val PLAYLISTS_FILE = "playlists.json"
     private const val SETTINGS_FILE = "settings.json"
+    private const val SEARCH_HISTORY_FILE = "searches.json"
     private const val MAX_FILENAME_LENGTH = 180
     private const val PROGRESS_POLL_MS = 400L
 
@@ -86,6 +87,10 @@ object SonoraBackend {
     private val _settings = MutableStateFlow(Settings())
 
     val settings: StateFlow<Settings> = _settings.asStateFlow()
+
+    private val _searchHistory = MutableStateFlow<List<String>>(emptyList())
+
+    val searchHistory: StateFlow<List<String>> = _searchHistory.asStateFlow()
 
     /**
      * Rescans the download directory.
@@ -142,6 +147,20 @@ object SonoraBackend {
 
     fun refreshSettings(context: Context) {
         scope.launch { _settings.value = settingsStore(context).load() }
+    }
+
+    fun refreshSearchHistory(context: Context) {
+        scope.launch { _searchHistory.value = searchHistoryStore(context).load() }
+    }
+
+    /**
+     * Drops the current search, leaving the recent queries to be shown in its place.
+     *
+     * The results go too: keeping them under an empty search box would leave no way back to the
+     * history, which is the point of clearing it.
+     */
+    fun clearSearch() {
+        _search.value = SearchState()
     }
 
     /**
@@ -316,6 +335,9 @@ object SonoraBackend {
     private fun settingsStore(context: Context) =
         SettingsStore(File(context.filesDir, SETTINGS_FILE))
 
+    private fun searchHistoryStore(context: Context) =
+        SearchHistoryStore(File(context.filesDir, SEARCH_HISTORY_FILE))
+
     /**
      * Downloads one search result.
      *
@@ -465,8 +487,7 @@ object SonoraBackend {
      * Soulseek searches have no completion signal — peers simply stop replying — so [search] is
      * marked not-searching after a fixed window while late results keep being appended.
      */
-    fun search(query: String) {
-        val current = session ?: return
+    fun search(context: Context, query: String) {        val current = session ?: return
         if (query.isBlank()) return
 
         val tokens = query.lowercase().split(WHITESPACE).filter { it.isNotEmpty() }
@@ -476,6 +497,8 @@ object SonoraBackend {
 
         _search.value = SearchState(query = query, searching = true)
         Log.d(TAG, "searching: $query")
+
+        recordSearch(context, query)
 
         scope.launch {
             // The socket write must not happen on the caller's thread.
@@ -517,6 +540,17 @@ object SonoraBackend {
 
             delay(SEARCH_WINDOW_MS)
             _search.update { if (it.query == query) it.copy(searching = false) else it }
+        }
+    }
+
+    /** Remembers a query so the search screen can offer it again. */
+    private fun recordSearch(context: Context, query: String) {
+        scope.launch {
+            val updated = SearchHistory.record(_searchHistory.value, query)
+            if (updated == _searchHistory.value) return@launch
+
+            searchHistoryStore(context).save(updated)
+            _searchHistory.value = updated
         }
     }
 

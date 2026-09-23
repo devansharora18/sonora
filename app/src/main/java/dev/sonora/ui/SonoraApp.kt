@@ -118,6 +118,7 @@ fun SonoraApp() {
             // than on every visit to the Library.
             LaunchedEffect(Unit) { SonoraBackend.refreshPlaylists(context) }
             LaunchedEffect(Unit) { SonoraBackend.refreshSettings(context) }
+            LaunchedEffect(Unit) { SonoraBackend.refreshSearchHistory(context) }
 
             LaunchedEffect(playback.track, playback.isPlaying) {
                 while (playback.track != null) {
@@ -164,7 +165,15 @@ fun SonoraApp() {
                     MainTab.entries.forEach { entry ->
                         NavigationBarItem(
                             selected = tab == entry,
-                            onClick = { tab = entry },
+                            onClick = {
+                                // Tapping Search while already on it clears the search, which is
+                                // also what brings the recent queries back into view.
+                                if (tab == entry && entry == MainTab.Search) {
+                                    SonoraBackend.clearSearch()
+                                } else {
+                                    tab = entry
+                                }
+                            },
                             icon = {
                                 Icon(
                                     imageVector = entry.icon(),
