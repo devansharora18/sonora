@@ -67,7 +67,13 @@ internal fun rememberCoverArt(releaseGroupId: String): ImageBitmap? {
         val loaded = withContext(Dispatchers.IO) {
             SonoraBackend.coverArt(context, releaseGroupId)
         }
-        coverArtCache[releaseGroupId] = loaded
+
+        // Only images are remembered here: a ConcurrentHashMap has no room for a null, and a release
+        // with no cover is already remembered on disk, so asking again costs a file check and no
+        // network.
+        if (loaded != null) {
+            coverArtCache[releaseGroupId] = loaded
+        }
         artwork = loaded
     }
 
