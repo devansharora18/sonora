@@ -41,6 +41,15 @@ object SonoraPlayer {
     /** Mirrors the local queue because the service exposes media items, not LibraryTrack values. */
     private var queue: List<LibraryTrack> = emptyList()
 
+    /**
+     * Called whenever a track begins, whoever started it.
+     *
+     * Set by the backend, which keeps the record. A hook rather than a call at each play site
+     * because the player is the only thing that sees next, previous, shuffle and auto-advance, so
+     * this is the one place that knows everything that was actually listened to.
+     */
+    var onTrackStarted: ((LibraryTrack) -> Unit)? = null
+
     /** Starts connecting to the playback service. Safe to call repeatedly. */
     fun connect(context: Context) {
         if (controller != null || connecting) return
@@ -204,6 +213,8 @@ object SonoraPlayer {
             isShuffled = active.shuffleModeEnabled,
             repeatMode = repeatModeOf(active.repeatMode),
         )
+
+        onTrackStarted?.invoke(track)
     }
 
     /** Media3 reports the repeat mode as an int; this keeps that detail out of the state. */

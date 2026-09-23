@@ -68,6 +68,7 @@ object SonoraBackend {
     private const val PLAYLISTS_FILE = "playlists.json"
     private const val SETTINGS_FILE = "settings.json"
     private const val SEARCH_HISTORY_FILE = "searches.json"
+    private const val PLAY_HISTORY_FILE = "plays.json"
     private const val METADATA_CACHE_DIRECTORY = "metadata"
     private const val COVER_ART_CACHE_DIRECTORY = "covers"
     private const val MAX_FILENAME_LENGTH = 180
@@ -111,6 +112,17 @@ object SonoraBackend {
     private val _searchHistory = MutableStateFlow<List<String>>(emptyList())
 
     val searchHistory: StateFlow<List<String>> = _searchHistory.asStateFlow()
+
+    /**
+     * Tracks that have been played, most recent first.
+     *
+     * Paths rather than tracks: the filesystem is the library, so what is remembered is which file
+     * was played. One that has since been deleted simply drops out when the list is resolved
+     * against the library.
+     */
+    private val _playHistory = MutableStateFlow<List<PlayedTrack>>(emptyList())
+
+    val playHistory: StateFlow<List<PlayedTrack>> = _playHistory.asStateFlow()
 
     /**
      * Albums MusicBrainz lists for an artist that the library does not hold, keyed by artist.
@@ -205,6 +217,39 @@ object SonoraBackend {
 
     fun refreshSearchHistory(context: Context) {
         scope.launch { _searchHistory.value = searchHistoryStore(context).load() }
+    }
+
+    /**
+     * Reads the play history, and points the player at the recorder.
+     *
+     * The wiring belongs here rather than in the player: this is where the store lives, and the
+     * callback needs a context that no screen is around to provide.
+     */
+    fun refreshPlayHistory(context: Context) {
+        val appContext = context.applicationContext
+        SonoraPlayer.onTrackStarted = { track -> recordPlay(appContext, track) }
+
+        scope.launch { _playHistory.value = playHistoryStore(appContext).load() }
+    }
+
+    /**
+     * Remembers that a track started.
+     *
+     * Called for every track that begins — a tap, next, shuffle, or the end of the one before — so
+     * the list is what was listened to rather than what was tapped.
+     */
+    private fun recordPlay(context: Context, track: LibraryTrack) {
+        scope.launch {
+            val updated = PlayHistory.record(
+                history = _playHistory.value,
+                path = track.file.absolutePath,
+                at = System.currentTimeMillis(),
+            )
+            if (updated == _playHistory.value) return@launch
+
+            playHistoryStore(context).save(updated)
+            _playHistory.value = updated
+        }
     }
 
     /**
@@ -392,6 +437,9 @@ object SonoraBackend {
 
     private fun searchHistoryStore(context: Context) =
         SearchHistoryStore(File(context.filesDir, SEARCH_HISTORY_FILE))
+
+    private fun playHistoryStore(context: Context) =
+        PlayHistoryStore(File(context.filesDir, PLAY_HISTORY_FILE))
 
     /**
      * Cover art for a catalogue release, or null when it has none.

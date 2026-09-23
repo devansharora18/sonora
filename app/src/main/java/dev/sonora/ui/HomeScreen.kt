@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -53,9 +54,9 @@ import java.io.File
 /**
  * Home is "what's new and what's next", as opposed to the Library's "everything I have".
  *
- * Every row here answers a question the Library cannot: what arrived recently, what you were
- * looking for, what is downloading. Nothing is recommended, because there is no catalogue to
- * recommend from and no listening history yet to draw on.
+ * Every row answers a question the Library cannot: where you left off, what arrived recently, what
+ * you were looking for, what is downloading. Nothing here is recommended — a catalogue can say what
+ * exists, but nothing yet says what is worth hearing — so these are things the user did.
  */
 @Composable
 fun HomeScreen(onRunSearch: (String) -> Unit) {
@@ -63,15 +64,24 @@ fun HomeScreen(onRunSearch: (String) -> Unit) {
     val tracks by SonoraBackend.library.collectAsState()
     val playlists by SonoraBackend.playlists.collectAsState()
     val history by SonoraBackend.searchHistory.collectAsState()
+    val playHistory by SonoraBackend.playHistory.collectAsState()
     val download by SonoraBackend.download.collectAsState()
 
     LaunchedEffect(Unit) {
         SonoraBackend.refreshLibrary(context)
         SonoraBackend.refreshPlaylists(context)
         SonoraBackend.refreshSearchHistory(context)
+        SonoraBackend.refreshPlayHistory(context)
     }
 
     val recentAlbums = remember(tracks) { LibraryGrouping.recentAlbums(tracks, limit = 12) }
+
+    // Resolved against the library rather than remembered as tracks: the filesystem is the library,
+    // so a file that has since been deleted drops out and the rest are current.
+    val byPath = remember(tracks) { tracks.associateBy { it.file.absolutePath } }
+    val recentTracks = remember(playHistory, byPath) {
+        playHistory.mapNotNull { byPath[it.path] }
+    }
 
     // Liked Songs is a playlist like any other, so it is pinned first rather than shown twice.
     val orderedPlaylists = remember(playlists) {
@@ -107,6 +117,12 @@ fun HomeScreen(onRunSearch: (String) -> Unit) {
             }
         }
 
+        // First after the download, because it is the most actionable thing on the screen: the
+        // other rows say what exists, this one says what you were in the middle of.
+        if (recentTracks.isNotEmpty()) {
+            item { RecentlyPlayedRow(tracks = recentTracks) }
+        }
+
         if (recentAlbums.isNotEmpty()) {
             item {
                 Section(
@@ -123,6 +139,32 @@ fun HomeScreen(onRunSearch: (String) -> Unit) {
 
         if (history.isNotEmpty()) {
             item { RecentSearchesRow(history = history, onRunSearch = onRunSearch) }
+        }
+    }
+}
+
+@Composable
+private fun RecentlyPlayedRow(tracks: List<LibraryTrack>) {
+    val context = LocalContext.current
+
+    Column {
+        SectionHeader(title = "Recently played", subtitle = "Pick up where you left off")
+
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            itemsIndexed(tracks, key = { _, track -> track.file.absolutePath }) { index, track ->
+                MediaCard(
+                    artwork = rememberArtwork(track.file),
+                    title = track.title,
+                    subtitle = listOfNotNull(track.artist, track.album).joinToString("  \u00b7  "),
+                    shape = RoundedCornerShape(8.dp),
+                    // The row becomes the queue, so next and previous carry on down it rather than
+                    // stopping at the one track that was tapped.
+                    onClick = { SonoraPlayer.play(context, tracks, index) },
+                )
+            }
         }
     }
 }

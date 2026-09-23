@@ -120,6 +120,7 @@ fun SonoraApp() {
             LaunchedEffect(Unit) { SonoraBackend.refreshPlaylists(context) }
             LaunchedEffect(Unit) { SonoraBackend.refreshSettings(context) }
             LaunchedEffect(Unit) { SonoraBackend.refreshSearchHistory(context) }
+            LaunchedEffect(Unit) { SonoraBackend.refreshPlayHistory(context) }
 
             LaunchedEffect(playback.track, playback.isPlaying) {
                 while (playback.track != null) {
