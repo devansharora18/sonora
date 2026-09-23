@@ -494,6 +494,8 @@ object SonoraBackend {
         scope.launch {
             val albums = musicBrainz(context).searchAlbums(query) ?: return@launch
 
+            Log.d(TAG, "catalogue: ${albums.size} album(s) for $query")
+
             if (_search.value.query == query) _catalogue.value = albums
         }
     }
@@ -501,7 +503,10 @@ object SonoraBackend {
     private fun musicBrainz(context: Context): MusicBrainzClient =
         brainz ?: MusicBrainzClient(
             store = MetadataStore(File(context.filesDir, METADATA_CACHE_DIRECTORY)),
-            fetch = MusicBrainzTransport(onTrace = { Log.d(TAG, "musicbrainz: $it") }),
+            fetch = MusicBrainzTransport(
+                onTrace = { Log.d(TAG, "musicbrainz: $it") },
+                onFailure = { Log.d(TAG, "musicbrainz failed: $it") },
+            ),
         ).also { brainz = it }
 
     /**

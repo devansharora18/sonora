@@ -16,6 +16,13 @@ class MusicBrainzTransport(
     private val sleep: (Long) -> Unit = { Thread.sleep(it) },
     /** Every real request, so "how few fetches" can be measured rather than assumed. */
     private val onTrace: (String) -> Unit = {},
+    /**
+     * Why a fetch did not produce a body.
+     *
+     * Without this a failure is indistinguishable from "MusicBrainz had nothing", which is how a
+     * release build that could not reach it at all looked exactly like a search with no matches.
+     */
+    private val onFailure: (String) -> Unit = {},
 ) : (String) -> String? {
 
     @Volatile
@@ -37,13 +44,17 @@ class MusicBrainzTransport(
             try {
                 // A busy or unknown-artist response is not worth retrying here: the caller treats
                 // null as "nothing to add", and the next lookup will ask again.
-                if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
+                if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+                    onFailure("http ${connection.responseCode}")
+                    return null
+                }
 
                 connection.inputStream.bufferedReader().use { it.readText() }
             } finally {
                 connection.disconnect()
             }
-        }.getOrNull()
+        }.onFailure { onFailure("${it.javaClass.simpleName}: ${it.message}") }
+            .getOrNull()
     }
 
     /** Blocks until a second has passed since the last request. */

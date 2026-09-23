@@ -19,3 +19,8 @@ local.properties
 
 # Built artifacts for testing
 /dist/
+
+# Release signing. The key and its passwords never leave the machine that made them.
+keystore.properties
+*.jks
+*.keystore

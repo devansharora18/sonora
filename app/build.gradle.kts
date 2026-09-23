@@ -1,7 +1,21 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+}
+
+/**
+ * The release signing key, deliberately not in the repository.
+ *
+ * keystore.properties holds the keystore's path and passwords and is gitignored, so a checkout
+ * without it can still build and test a debug APK. Losing it means losing the ability to update an
+ * installed release, so it belongs in a password manager as much as it belongs on disk.
+ */
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
 }
 
 android {
@@ -25,6 +39,35 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    signingConfigs {
+        // Only when the key is present, so that a checkout without one still builds.
+        if (keystoreProperties.isNotEmpty()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // Null when there is no keystore: the build runs and produces an unsigned APK, which
+            // is a clear enough outcome for a checkout that has no key to sign with.
+            signingConfig = signingConfigs.findByName("release")
+
+            // Shrinking is the point of a release build: a debug APK carries every unused class
+            // and every debug assertion.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
     }
 }
 
