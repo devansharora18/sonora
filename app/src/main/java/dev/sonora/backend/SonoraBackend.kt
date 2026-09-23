@@ -372,6 +372,20 @@ object SonoraBackend {
         }
     }
 
+    /**
+     * Drops everything still waiting to download.
+     *
+     * The transfer already running is left alone: aborting it mid-stream means closing its socket,
+     * and that connection belongs to the transfer layer. It finishes; nothing follows it.
+     */
+    fun cancelPendingDownloads() {
+        pending.clear()
+
+        _download.update { state ->
+            if (state is DownloadState.Downloading) state.copy(remaining = 0) else state
+        }
+    }
+
     /** Runs one transfer to completion, reporting progress and the outcome. */
     private suspend fun transfer(context: Context, hit: SearchHit) {
         val current = session ?: return
@@ -697,6 +711,10 @@ object SonoraBackend {
     }
 
     private fun closeSession() {
+        // Queued transfers cannot proceed without a session, so they are dropped rather than left
+        // to be silently skipped one at a time.
+        pending.clear()
+
         session?.close()
         session = null
         _state.value = BackendState.Idle

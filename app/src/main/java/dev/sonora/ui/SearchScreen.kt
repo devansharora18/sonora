@@ -164,7 +164,10 @@ fun SearchScreen() {
             }
         }
 
-        DownloadStatus(download)
+        DownloadStatus(
+            state = download,
+            onCancelRemaining = { SonoraBackend.cancelPendingDownloads() },
+        )
 
         when {
             searchState.searching -> Note("Searching\u2026 ${searchState.matched} match(es) so far")
@@ -467,22 +470,33 @@ private fun ResultRow(
 }
 
 @Composable
-private fun DownloadStatus(state: DownloadState) {
+private fun DownloadStatus(state: DownloadState, onCancelRemaining: () -> Unit) {
     when (state) {
         DownloadState.Idle -> Unit
 
         is DownloadState.Downloading -> Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-            Text(
-                text = buildString {
-                    append("Downloading ${state.filename} \u2014 ")
-                    append(state.fraction?.let { "${(it * 100).toInt()}%" } ?: formatSize(state.bytes))
-                    if (state.remaining > 0) append("  \u00b7  ${state.remaining} queued")
-                },
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(vertical = 8.dp),
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = buildString {
+                        append("Downloading ${state.filename} \u2014 ")
+                        append(
+                            state.fraction?.let { "${(it * 100).toInt()}%" }
+                                ?: formatSize(state.bytes),
+                        )
+                        if (state.remaining > 0) append("  \u00b7  ${state.remaining} queued")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(vertical = 8.dp),
+                )
+
+                if (state.remaining > 0) {
+                    TextButton(onClick = onCancelRemaining) { Text("Cancel remaining") }
+                }
+            }
             LinearProgressIndicator(
                 progress = { state.fraction ?: 0f },
                 modifier = Modifier.fillMaxWidth(),
