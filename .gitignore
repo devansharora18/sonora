@@ -16,3 +16,6 @@ local.properties
 
 # OS
 .DS_Store
+
+# Built artifacts for testing
+/dist/
