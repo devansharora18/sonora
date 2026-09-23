@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -66,7 +67,9 @@ import dev.sonora.backend.LibraryTrack
 import dev.sonora.backend.Playlists
 import dev.sonora.backend.SonoraBackend
 import dev.sonora.backend.SonoraPlayer
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /**
  * App root. Navigation and the feature graph hang off here.
@@ -99,6 +102,15 @@ fun SonoraApp() {
         }
 
         permissions.launch(wanted.toTypedArray())
+    }
+
+    // A remembered login connects without being asked — that is the whole point of remembering it.
+    // The screen below is the fallback for when it does not work.
+    LaunchedEffect(Unit) {
+        if (state !is BackendState.Idle) return@LaunchedEffect
+
+        val saved = withContext(Dispatchers.IO) { SonoraBackend.savedLogin(context) }
+        saved?.let { SonoraBackend.connect(context, it.username, it.password, remember = true) }
     }
 
     when (val current = state) {
@@ -367,6 +379,18 @@ private fun ConnectScreen(state: BackendState) {
     val context = LocalContext.current
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var remember by remember { mutableStateOf(false) }
+
+    // Filled in before the fields are read, so a login that is remembered does not have to be typed
+    // again after a failure — which is the case this screen is actually reached in.
+    LaunchedEffect(Unit) {
+        val saved = withContext(Dispatchers.IO) { SonoraBackend.savedLogin(context) }
+            ?: return@LaunchedEffect
+
+        username = saved.username
+        password = saved.password
+        remember = true
+    }
 
     Column(
         modifier = Modifier
@@ -397,8 +421,26 @@ private fun ConnectScreen(state: BackendState) {
                     modifier = Modifier.fillMaxWidth(),
                 )
 
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = remember, onCheckedChange = { remember = it })
+
+                    Column {
+                        Text(text = "Save login", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = "Encrypted on this device",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
                 Button(
-                    onClick = { SonoraBackend.connect(context, username.trim(), password) },
+                    onClick = {
+                        SonoraBackend.connect(context, username.trim(), password, remember)
+                    },
                     enabled = username.isNotBlank() && password.isNotBlank(),
                 ) {
                     Text("Connect")

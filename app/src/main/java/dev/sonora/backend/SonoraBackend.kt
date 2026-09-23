@@ -830,8 +830,19 @@ object SonoraBackend {
      *
      * Blocking work happens on [scope]; progress and the outcome appear on [state].
      */
-    fun connect(context: Context, username: String, password: String) {
+    fun connect(
+        context: Context,
+        username: String,
+        password: String,
+        /**
+         * Whether to keep the login. Only ever honoured for one that works: a rejected password is
+         * forgotten rather than saved, because it would fail the same way on every launch.
+         */
+        remember: Boolean = false,
+    ) {
         if (_state.value == BackendState.Connecting || _state.value is BackendState.Connected) return
+
+        Log.d(TAG, "connecting as $username (remember=$remember)")
 
         _state.value = BackendState.Connecting
         SonoraService.start(context)
@@ -863,11 +874,17 @@ object SonoraBackend {
                 _state.value = when (response) {
                     is LoginResponse.Success -> {
                         session = newSession
+                        rememberLogin(context, username, password, remember)
                         BackendState.Connected(response.greeting)
                     }
 
                     is LoginResponse.Rejected -> {
                         newSession.close()
+
+                        // A remembered login that has stopped working is worse than none: it would
+                        // fail the same way, unattended, on every launch.
+                        rememberLogin(context, username, password, remember = false)
+
                         BackendState.Failed(
                             response.detail?.let { "${response.reason}: $it" } ?: response.reason,
                         )
@@ -921,6 +938,18 @@ object SonoraBackend {
 
             Log.d(TAG, "server connection lost; closing the session")
             closeSession()
+        }
+    }
+
+    /** The login the user asked to be remembered, or null. Blocking: it reads the Keystore. */
+    fun savedLogin(context: Context): SavedCredentials? = CredentialStore(context).load()
+
+    /** Remembers a login that worked, or forgets the one that did not. */
+    private fun rememberLogin(context: Context, username: String, password: String, remember: Boolean) {
+        val store = CredentialStore(context)
+
+        scope.launch {
+            if (remember) store.save(SavedCredentials(username, password)) else store.clear()
         }
     }
 }
