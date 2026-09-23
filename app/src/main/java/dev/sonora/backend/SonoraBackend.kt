@@ -395,6 +395,12 @@ object SonoraBackend {
                 // Shared storage is scanned by the media provider, not by us: without this the file
                 // exists but is invisible to every other player and to the system's own music apps.
                 MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), null, null)
+
+                // What we share just changed, and the server is what tells other users. Left until
+                // the next connect, a peer would still see the old — possibly zero — count and
+                // refuse to upload to us.
+                current.advertiseShares()
+
                 refreshLibrary(context)
             }
         }

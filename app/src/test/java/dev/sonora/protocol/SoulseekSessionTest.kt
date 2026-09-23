@@ -623,6 +623,30 @@ class SoulseekSessionTest {
      */
     private var listenPort: Int? = null
 
+    @Test
+    fun `share counts are re-reported when the share grows`() {
+        val share = folder.newFolder("Soulseek")
+        File(share, "first.flac").writeBytes(ByteArray(10))
+
+        FakeSoulseekServer().use { server ->
+            session(server, shareDirectory = share).use { session ->
+                session.connect()
+
+                val initial = MessageReader(server.await(SharedFoldersFiles.CODE).body)
+                assertEquals(1L, initial.readUInt32()) // directories
+                assertEquals(1L, initial.readUInt32()) // files
+
+                // A download lands in the share, and the new count is reported without reconnecting.
+                File(share, "second.flac").writeBytes(ByteArray(10))
+                session.advertiseShares()
+
+                val updated = MessageReader(server.await(SharedFoldersFiles.CODE).body)
+                assertEquals(1L, updated.readUInt32())
+                assertEquals(2L, updated.readUInt32())
+            }
+        }
+    }
+
     /** Dials the listener the session advertised and completes a peer handshake on it. */
     private fun peerTo(
         server: FakeSoulseekServer,

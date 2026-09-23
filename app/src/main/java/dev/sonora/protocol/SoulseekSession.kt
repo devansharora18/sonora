@@ -214,9 +214,7 @@ class SoulseekSession(
         connection.send(SetWaitPort.CODE, SetWaitPort.request(peerListener.boundPort))
         connection.send(SetStatus.CODE, SetStatus.request(SetStatus.ONLINE))
 
-        val (directories, files) = shareDirectory?.let(::countShared) ?: (0L to 0L)
-        onTrace("advertising $directories directory(ies), $files file(s)")
-        connection.send(SharedFoldersFiles.CODE, SharedFoldersFiles.request(directories, files))
+        advertiseShares(connection)
 
         // Join the distributed tree as a leaf. Saying we have no parent makes the server offer
         // candidates; children stay refused until we can forward, so we are not a dead branch.
@@ -230,6 +228,31 @@ class SoulseekSession(
 
         server = connection
         return response
+    }
+
+    /**
+     * Reports how much we share.
+     *
+     * The server holds the last numbers it was told, and other clients decide whether to upload to
+     * us from them — a user sharing nothing is a leecher, and many clients refuse leechers. Calling
+     * this only at connect would mean a fresh install advertises nothing until its next reconnect,
+     * however much it has downloaded by then.
+     */
+    fun advertiseShares() {
+        val connection = server ?: return
+        advertiseShares(connection)
+    }
+
+    /**
+     * Reports how much we share over [connection].
+     *
+     * Takes the connection rather than reading [server] because the handshake reports the share
+     * before that field is assigned.
+     */
+    private fun advertiseShares(connection: ServerConnection) {
+        val (directories, files) = shareDirectory?.let(::countShared) ?: (0L to 0L)
+        onTrace("advertising $directories directory(ies), $files file(s)")
+        connection.send(SharedFoldersFiles.CODE, SharedFoldersFiles.request(directories, files))
     }
 
     /**
