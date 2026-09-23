@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A sound wave: five bars of an uneven rhythm, which is what makes it read as audio rather than as
+    a pattern. Each bar is a stroked line with round caps, so it is one shape rather than a rounded
+    rectangle.
+
+    Everything sits inside the 66-unit circle a launcher guarantees, so no mask clips it. The
+    tallest bar reaches 32.5 units from the centre.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M28,43 L28,65 M41,35 L41,73 M54,26 L54,82 M67,38 L67,70 M80,41 L80,67"
+        android:strokeColor="#E6002E"
+        android:strokeWidth="9"
+        android:strokeLineCap="round" />
+</vector>

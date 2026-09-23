@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The same mark for themed icons, where the launcher draws it in one colour of its own choosing.
+    Only the shape is ours to decide here.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M28,43 L28,65 M41,35 L41,73 M54,26 L54,82 M67,38 L67,70 M80,41 L80,67"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="9"
+        android:strokeLineCap="round" />
+</vector>

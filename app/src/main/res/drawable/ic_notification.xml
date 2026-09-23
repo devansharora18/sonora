@@ -1,9 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The app mark for the status bar, scaled from the launcher icon. A notification icon is a
+    silhouette the system tints, so only the shape and the round caps matter here.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
     <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M12,3v10.55c-0.59,-0.34 -1.27,-0.55 -2,-0.55 -2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4V7h4V3h-6z" />
+        android:pathData="M6.22,9.56 L6.22,14.44 M9.11,7.78 L9.11,16.22 M12,5.78 L12,18.22 M14.89,8.44 L14.89,15.56 M17.78,9.11 L17.78,14.89"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round" />
 </vector>

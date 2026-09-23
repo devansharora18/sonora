@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        The icon's own background. The app's background colour, so the mark sits on the app rather
+        than on a plate of its own.
+    -->
+    <color name="ic_launcher_background">#000000</color>
+</resources>
