@@ -44,12 +44,21 @@ class SonoraService : Service() {
 
         scope.launch {
             combine(SonoraBackend.state, SonoraBackend.download) { backend, download ->
-                textFor(backend, download)
-            }.collect { text ->
+                backend to download
+            }.collect { (backend, download) ->
+                // The service exists to hold the connection alive. With no connection there is
+                // nothing to hold, and a notification claiming to be connected over a session that
+                // has ended is worse than none — which is what a dropped connection used to leave
+                // behind.
+                if (backend !is BackendState.Connected && backend !is BackendState.Connecting) {
+                    stopSelf()
+                    return@collect
+                }
+
                 // startForeground, not NotificationManager.notify: re-posting through the manager
                 // detaches the notification from the service, and the system then leaves it on
                 // screen when the service stops.
-                startForeground(NOTIFICATION_ID, buildNotification(text))
+                startForeground(NOTIFICATION_ID, buildNotification(textFor(backend, download)))
             }
         }
     }

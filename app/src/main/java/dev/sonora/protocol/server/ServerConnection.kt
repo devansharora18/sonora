@@ -4,6 +4,7 @@ import dev.sonora.protocol.Framing
 import dev.sonora.protocol.Message
 import java.io.Closeable
 import java.net.Socket
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 /**
@@ -12,15 +13,36 @@ import kotlin.concurrent.thread
  * Read the login response with [read] before calling [startReading]; after that, messages
  * arrive continuously on a background thread and are handed to the callback.
  */
-class ServerConnection(private val socket: Socket) : Closeable {
+class ServerConnection(
+    private val socket: Socket,
+    /**
+     * Called once, from whichever thread notices first, when the connection ends without us asking
+     * it to.
+     *
+     * A socket that dies mid-session is an ordinary end to a long-lived connection, not a mistake
+     * by the caller: the network drops and the server closes idle sessions. Reporting it is what
+     * lets the app stop claiming to be connected.
+     */
+    private val onLost: () -> Unit = {},
+) : Closeable {
 
     @Volatile
     private var closed = false
 
+    /** The reader and a writer can both notice the same death; it is only reported once. */
+    private val reported = AtomicBoolean(false)
+
     private var reader: Thread? = null
 
     fun send(code: Long, body: ByteArray) {
-        Framing.SERVER.write(socket.getOutputStream(), code, body)
+        try {
+            Framing.SERVER.write(socket.getOutputStream(), code, body)
+        } catch (_: Exception) {
+            // Throwing here would carry a dead socket into whatever happened to be searching at the
+            // time; a write to a connection that is already gone is the same event as the reader
+            // noticing it, and is handled the same way.
+            reportLost()
+        }
     }
 
     /** Reads a single message. Only valid before [startReading]. */
@@ -43,6 +65,7 @@ class ServerConnection(private val socket: Socket) : Closeable {
                 Framing.SERVER.read(socket.getInputStream())
             } catch (_: Exception) {
                 // Socket closed, or framing is desynced — either way the connection is done.
+                reportLost()
                 return
             }
 
@@ -52,6 +75,13 @@ class ServerConnection(private val socket: Socket) : Closeable {
                 // The body is untrusted, so one unparseable message must not end the session.
             }
         }
+    }
+
+    private fun reportLost() {
+        // A connection we closed ourselves has not been lost.
+        if (closed) return
+
+        if (reported.compareAndSet(false, true)) onLost()
     }
 
     override fun close() {

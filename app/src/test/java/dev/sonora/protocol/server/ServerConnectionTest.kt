@@ -90,16 +90,67 @@ class ServerConnectionTest {
         }
     }
 
+    @Test
+    fun `reports the connection ending when the peer goes away`() {
+        val lost = CountDownLatch(1)
+
+        withConnection({ lost.countDown() }) { connection, peer ->
+            connection.startReading { }
+            peer.close()
+
+            assertTrue("the loss was never reported", lost.await(5, TimeUnit.SECONDS))
+        }
+    }
+
+    @Test
+    fun `a write to a dead connection is reported rather than thrown`() {
+        var lost = 0
+        val connection = ServerConnection(closedSocket()) { lost++ }
+
+        // This is what used to take the process down: a search written to a socket that had died.
+        connection.send(FileSearch.CODE, FileSearch.request(1L, "anything"))
+
+        assertEquals(1, lost)
+    }
+
+    @Test
+    fun `a loss is reported once however many writes fail`() {
+        var lost = 0
+        val connection = ServerConnection(closedSocket()) { lost++ }
+
+        connection.send(FileSearch.CODE, FileSearch.request(1L, "one"))
+        connection.send(FileSearch.CODE, FileSearch.request(2L, "two"))
+
+        assertEquals(1, lost)
+    }
+
+    @Test
+    fun `a connection we closed ourselves has not been lost`() {
+        var lost = 0
+        val connection = ServerConnection(closedSocket()) { lost++ }
+
+        connection.close()
+        connection.send(FileSearch.CODE, FileSearch.request(1L, "anything"))
+
+        assertEquals(0, lost)
+    }
+
+    /** Already closed, so the first write fails the way a dropped connection does. */
+    private fun closedSocket(): Socket = Socket().also { it.close() }
+
     private fun write(socket: Socket, code: Long, body: ByteArray = ByteArray(0)) {
         socket.getOutputStream().write(Framing.SERVER.encode(code, body))
         socket.getOutputStream().flush()
     }
 
-    private fun withConnection(block: (ServerConnection, Socket) -> Unit) {
+    private fun withConnection(
+        onLost: () -> Unit = {},
+        block: (ServerConnection, Socket) -> Unit,
+    ) {
         ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
             Socket(InetAddress.getLoopbackAddress(), server.localPort).use { client ->
                 server.accept().use { peer ->
-                    ServerConnection(client).use { connection ->
+                    ServerConnection(client, onLost).use { connection ->
                         block(connection, peer)
                     }
                 }

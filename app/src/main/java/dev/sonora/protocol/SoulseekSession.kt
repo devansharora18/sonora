@@ -107,6 +107,14 @@ class SoulseekSession(
     private val fileConnectionFallbackMillis: Long = DEFAULT_FILE_CONNECTION_FALLBACK_MS,
     /** Diagnostic sink: peer connection attempts and their outcome. Used by the live spikes. */
     private val onTrace: (String) -> Unit = {},
+    /**
+     * The server connection ended without being asked to.
+     *
+     * Fires from whichever thread noticed, so the handler must be thread-safe and must not block.
+     * Nothing can be sent or received afterwards, so the session is finished either way; this
+     * exists so the app can say so, rather than failing one request at a time.
+     */
+    private val onServerLost: () -> Unit = {},
 ) : Closeable {
 
     private val searches = ConcurrentHashMap<Long, (SearchResponse) -> Unit>()
@@ -191,7 +199,7 @@ class SoulseekSession(
         val socket = Socket()
         socket.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
 
-        val connection = ServerConnection(socket)
+        val connection = ServerConnection(socket, onServerLost)
         val response = try {
             connection.send(
                 Login.CODE,

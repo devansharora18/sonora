@@ -786,6 +786,7 @@ object SonoraBackend {
                     _settings.value.shareTreeUri ?: _settings.value.downloadTreeUri,
                 ).directory,
                 onTrace = { Log.d(TAG, it) },
+                onServerLost = ::onServerLost,
             )
 
             try {
@@ -833,5 +834,25 @@ object SonoraBackend {
         session?.close()
         session = null
         _state.value = BackendState.Idle
+    }
+
+    /**
+     * The server connection ended on its own: the network dropped, or the server closed an idle
+     * session.
+     *
+     * Nothing can be sent or received afterwards, so the session is closed and the app returns to
+     * the connect screen. Without this the app keeps looking connected while every request fails —
+     * and the next write to the dead socket used to bring the process down.
+     */
+    private fun onServerLost() {
+        scope.launch {
+            // A session that was never adopted is not ours to tear down; connect() reports its own
+            // failure. A session closed deliberately is silent, so this cannot arrive late and take
+            // down the session that replaced it.
+            if (session == null) return@launch
+
+            Log.d(TAG, "server connection lost; closing the session")
+            closeSession()
+        }
     }
 }
