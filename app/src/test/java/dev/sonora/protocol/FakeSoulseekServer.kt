@@ -126,6 +126,12 @@ internal class FakeSoulseekServer(
         )
     }
 
+    /** Sends an arbitrary server message, for the ones with no dedicated helper. */
+    fun send(code: Long, body: ByteArray) {
+        val connection = checkNotNull(connection) { "no client connected yet" }
+        connection.send(code, body)
+    }
+
     override fun close() {
         connection?.close()
         client?.close()

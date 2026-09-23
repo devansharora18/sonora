@@ -1,5 +1,8 @@
 package dev.sonora.protocol
 
+import dev.sonora.protocol.peer.DistribBranchLevel
+import dev.sonora.protocol.peer.DistribBranchRoot
+import dev.sonora.protocol.peer.DistribSearch
 import dev.sonora.protocol.peer.FileTransfer
 import dev.sonora.protocol.peer.PeerInit
 import dev.sonora.protocol.peer.QueueUpload
@@ -10,8 +13,11 @@ import dev.sonora.protocol.peer.SharedFileListResponse
 import dev.sonora.protocol.peer.TransferRequest
 import dev.sonora.protocol.peer.TransferResponse
 import dev.sonora.protocol.peer.UploadDenied
+import dev.sonora.protocol.server.AcceptChildren
 import dev.sonora.protocol.server.FileSearch
+import dev.sonora.protocol.server.HaveNoParent
 import dev.sonora.protocol.server.LoginResponse
+import dev.sonora.protocol.server.PossibleParents
 import dev.sonora.protocol.server.SetStatus
 import dev.sonora.protocol.server.SetWaitPort
 import dev.sonora.protocol.server.SharedFoldersFiles
@@ -52,6 +58,63 @@ class SoulseekSessionTest {
                 assertEquals(SetWaitPort.CODE, server.next().code)
                 assertEquals(SetStatus.CODE, server.next().code)
                 assertEquals(SharedFoldersFiles.CODE, server.next().code)
+
+                // Then the distributed handshake: refuse children, and ask for a parent.
+                val children = server.next()
+                assertEquals(AcceptChildren.CODE, children.code)
+                assertFalse("a leaf must not accept children", MessageReader(children.body).readBool())
+
+                val noParent = server.next()
+                assertEquals(HaveNoParent.CODE, noParent.code)
+                assertTrue(MessageReader(noParent.body).readBool())
+            }
+        }
+    }
+
+    @Test
+    fun `joins the distributed tree and adopts a parent that forwards a search`() {
+        // The candidate advertises its position, then forwards a search. Only a node that does
+        // both is a parent worth adopting.
+        FakePeer(
+            holdOpen = true,
+            conversation = { peer ->
+                peer.send(DistribBranchLevel.CODE, DistribBranchLevel.request(level = 0))
+                peer.send(DistribBranchRoot.CODE, DistribBranchRoot.request("root_user"))
+                peer.send(
+                    DistribSearch.CODE,
+                    MessageWriter()
+                        .writeUInt32(49) // identifier, always ASCII '1'
+                        .writeString("searcher")
+                        .writeUInt32(7)
+                        .writeString("ocean eyes")
+                        .toByteArray(),
+                )
+            },
+        ).use { peer ->
+            FakeSoulseekServer().use { server ->
+                session(server).use { session ->
+                    session.connect()
+                    server.await(HaveNoParent.CODE)
+
+                    server.send(
+                        PossibleParents.CODE,
+                        MessageWriter()
+                            .writeUInt32(1)
+                            .writeString("candidate")
+                            .writeUInt32(FakeSoulseekServer.LOOPBACK_IP)
+                            .writeUInt32(peer.port.toLong())
+                            .toByteArray(),
+                    )
+
+                    assertTrue(
+                        "candidate should be dialled as a distributed connection",
+                        peer.awaitConnectionType(PeerInit.TYPE_DISTRIBUTED),
+                    )
+
+                    // Adoption is reported back, which is what stops more candidates arriving.
+                    val adopted = server.await(HaveNoParent.CODE)
+                    assertFalse(MessageReader(adopted.body).readBool())
+                }
             }
         }
     }

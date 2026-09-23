@@ -1,5 +1,8 @@
 package dev.sonora.protocol
 
+import dev.sonora.protocol.peer.DistribBranchLevel
+import dev.sonora.protocol.peer.DistribBranchRoot
+import dev.sonora.protocol.peer.DistribSearch
 import dev.sonora.protocol.peer.FileAttributes
 import dev.sonora.protocol.peer.FileSearchResponse
 import dev.sonora.protocol.peer.FileTransfer
@@ -17,12 +20,19 @@ import dev.sonora.protocol.peer.TransferRequest
 import dev.sonora.protocol.peer.TransferResponse
 import dev.sonora.protocol.peer.UploadDenied
 import dev.sonora.protocol.peer.UploadFailed
+import dev.sonora.protocol.server.AcceptChildren
+import dev.sonora.protocol.server.BranchLevel
+import dev.sonora.protocol.server.BranchRoot
 import dev.sonora.protocol.server.ConnectToPeer
+import dev.sonora.protocol.server.EmbeddedMessage
 import dev.sonora.protocol.server.FileSearch
 import dev.sonora.protocol.server.GetPeerAddress
+import dev.sonora.protocol.server.HaveNoParent
 import dev.sonora.protocol.server.Login
 import dev.sonora.protocol.server.LoginResponse
 import dev.sonora.protocol.server.PeerAddress
+import dev.sonora.protocol.server.PossibleParents
+import dev.sonora.protocol.server.ResetDistributed
 import dev.sonora.protocol.server.ServerConnection
 import dev.sonora.protocol.server.SetStatus
 import dev.sonora.protocol.server.SetWaitPort
@@ -118,6 +128,22 @@ class SoulseekSession(
      */
     private val pendingUploads = ConcurrentHashMap<String, NegotiatingUpload>()
 
+    /** The node we receive other users' searches from, once one adopts us. */
+    @Volatile
+    private var distributedParent: PeerSession? = null
+
+    /** True while a dialer is working through a batch of candidates. */
+    @Volatile
+    private var distributedDialing = false
+
+    /** Our depth in the tree: a root is 0, and each generation below it adds one. */
+    @Volatile
+    private var branchLevel = 0L
+
+    /** The root of our branch, as reported by our parent. */
+    @Volatile
+    private var branchRoot = ""
+
     private val dials = ThreadPoolExecutor(
         maxConcurrentPeers,
         maxConcurrentPeers,
@@ -191,6 +217,15 @@ class SoulseekSession(
         val (directories, files) = shareDirectory?.let(::countShared) ?: (0L to 0L)
         onTrace("advertising $directories directory(ies), $files file(s)")
         connection.send(SharedFoldersFiles.CODE, SharedFoldersFiles.request(directories, files))
+
+        // Join the distributed tree as a leaf. Saying we have no parent makes the server offer
+        // candidates; children stay refused until we can forward, so we are not a dead branch.
+        // The branch root and level are reported together with the request, as the reference does.
+        connection.send(AcceptChildren.CODE, AcceptChildren.request(enabled = false))
+        connection.send(HaveNoParent.CODE, HaveNoParent.request(noParent = true))
+        connection.send(BranchRoot.CODE, BranchRoot.request(username))
+        connection.send(BranchLevel.CODE, BranchLevel.request(0L))
+
         connection.startReading(::onServerMessage)
 
         server = connection
@@ -218,6 +253,147 @@ class SoulseekSession(
         when (message.code) {
             ConnectToPeer.CODE -> handleConnectToPeer(message.body)
             GetPeerAddress.CODE -> handlePeerAddress(message.body)
+
+            PossibleParents.CODE -> handlePossibleParents(message.body)
+
+            ResetDistributed.CODE -> {
+                onTrace("distributed reset; dropping parent")
+                distributedParent?.close()
+                distributedParent = null
+                server?.send(HaveNoParent.CODE, HaveNoParent.request(noParent = true))
+            }
+
+            EmbeddedMessage.CODE -> {
+                // The server only embeds messages for branch roots, which a leaf should never be.
+                onTrace("unexpected embedded distributed message; ignoring")
+            }
+        }
+    }
+
+    /**
+     * Offers of a parent to attach to.
+     *
+     * Several candidates are tried at once, because most of them are behind NAT and simply never
+     * answer: one at a time means joining only if the first few happen to be reachable. The first
+     * to forward a search wins and the rest are abandoned.
+     *
+     * The server re-offers at intervals, which is why only one batch runs at a time.
+     */
+    private fun handlePossibleParents(body: ByteArray) {
+        if (distributedParent != null || distributedDialing) return
+
+        val candidates = runCatching { PossibleParents.parse(body) }.getOrNull().orEmpty()
+        if (candidates.isEmpty()) return
+
+        onTrace("distributed candidates: ${candidates.joinToString { it.username }}")
+        distributedDialing = true
+
+        thread(name = "sonora-distributed-dial", isDaemon = true) {
+            try {
+                candidates.take(MAX_PARENT_ATTEMPTS).map { candidate ->
+                    thread(name = "sonora-distributed", isDaemon = true) {
+                        dialCandidate(candidate)
+                    }
+                }.forEach { it.join() }
+            } finally {
+                distributedDialing = false
+            }
+        }
+    }
+
+    private fun dialCandidate(candidate: UserAddress) {
+        if (closed || distributedParent != null) return
+
+        val session = dialDirect(candidate.username, candidate, PeerInit.TYPE_DISTRIBUTED)
+        if (session == null) {
+            onTrace("distributed parent unreachable: ${candidate.username}")
+            return
+        }
+
+        onTrace("distributed candidate connected: ${candidate.username}")
+        handleDistributed(session)
+    }
+
+    /**
+     * Reads a `D` connection until it ends, adopting it as our parent if it forwards a search.
+     *
+     * A node that advertises branch information but never forwards is not a parent worth having,
+     * so an unadopted connection is dropped once the adoption window passes and its slot goes to
+     * the next candidate.
+     */
+    private fun handleDistributed(session: PeerSession) {
+        val deadline = System.currentTimeMillis() + PARENT_ADOPTION_WINDOW_MS
+        var adopted = false
+        var candidateLevel: Long? = null
+        var candidateRoot = ""
+
+        try {
+            session.readTimeoutMillis = PEER_IDLE_TIMEOUT_MS
+
+            while (true) {
+                if (!adopted && System.currentTimeMillis() > deadline) return
+
+                val message = session.read()
+
+                when (message.code) {
+                    DistribBranchLevel.CODE -> {
+                        candidateLevel = runCatching {
+                            DistribBranchLevel.parse(message.body)
+                        }.getOrNull()
+
+                        onTrace("candidate ${session.username} is at level $candidateLevel")
+                    }
+
+                    DistribBranchRoot.CODE -> {
+                        candidateRoot = runCatching {
+                            DistribBranchRoot.parse(message.body)
+                        }.getOrDefault("")
+
+                        onTrace("candidate ${session.username} root $candidateRoot")
+                    }
+
+                    DistribSearch.CODE -> {
+                        // A search is the trigger, but only a candidate that has also declared its
+                        // position is a parent: without a level and a root we would be attaching to
+                        // a node that is not really in the tree.
+                        val level = candidateLevel
+                        if (level != null && candidateRoot.isNotEmpty()) {
+                            adopted = true
+                            adoptParent(session, level, candidateRoot)
+                        }
+
+                        val search = runCatching { DistribSearch.parse(message.body) }.getOrNull()
+                        if (search != null) onTrace("tree search from ${search.username}: ${search.query}")
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Parent gone, or we closed the connection on shutdown.
+        } finally {
+            session.close()
+            if (distributedParent === session) {
+                distributedParent = null
+                onTrace("distributed parent lost")
+            } else if (!adopted) {
+                onTrace("distributed candidate gave nothing: ${session.username}")
+            }
+        }
+    }
+
+    private fun adoptParent(session: PeerSession, parentLevel: Long, parentRoot: String) {
+        if (distributedParent != null) return
+
+        distributedParent = session
+        branchLevel = parentLevel + 1
+        branchRoot = parentRoot
+
+        onTrace("distributed parent adopted: ${session.username} (level $branchLevel, root $branchRoot)")
+
+        // Reported to the server, which is what stops it offering more candidates.
+        server?.let { connection ->
+            connection.send(HaveNoParent.CODE, HaveNoParent.request(noParent = false))
+            connection.send(BranchRoot.CODE, BranchRoot.request(branchRoot))
+            connection.send(BranchLevel.CODE, BranchLevel.request(branchLevel))
         }
     }
 
@@ -851,6 +1027,17 @@ class SoulseekSession(
         private const val SEARCH_CONNECTION_IDLE_MS = 8_000
 
         private const val PEER_IDLE_TIMEOUT_MS = 30_000
+
+        /** Candidates dialled per offer. The reference dials every one, and so do we. */
+        private const val MAX_PARENT_ATTEMPTS = 10
+
+        /**
+         * How long a connected candidate has to declare itself and forward a search.
+         *
+         * Short on purpose: a candidate that also has us in its own candidate list ignores the
+         * connection and says nothing, so waiting long only delays the next batch.
+         */
+        private const val PARENT_ADOPTION_WINDOW_MS = 60_000L
         private const val ADDRESS_TIMEOUT_MS = 10_000L
 
         /**
