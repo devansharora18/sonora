@@ -2,9 +2,14 @@ package dev.sonora.backend
 
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 
 class LibraryGroupingTest {
+
+    @get:Rule
+    val folder = TemporaryFolder()
 
     private fun track(
         name: String,
@@ -102,5 +107,41 @@ class LibraryGroupingTest {
     fun `an empty library groups to nothing`() {
         assertEquals(emptyList<LibraryGrouping.Album>(), LibraryGrouping.albums(emptyList()))
         assertEquals(emptyList<LibraryGrouping.Artist>(), LibraryGrouping.artists(emptyList()))
+    }
+
+    @Test
+    fun `recent albums are ordered by when their newest track arrived`() {
+        val old = realTrack("old.flac", album = "Old", modified = 1_000)
+        val middle = realTrack("middle.flac", album = "Middle", modified = 2_000)
+        val newest = realTrack("newest.flac", album = "Newest", modified = 3_000)
+
+        val recent = LibraryGrouping.recentAlbums(listOf(old, middle, newest), limit = 10)
+
+        assertEquals(listOf("Newest", "Middle", "Old"), recent.map { it.name })
+    }
+
+    @Test
+    fun `recent albums are capped at the limit`() {
+        val tracks = (1..5).map { index ->
+            realTrack("t$index.flac", album = "Album $index", modified = index * 1_000L)
+        }
+
+        val recent = LibraryGrouping.recentAlbums(tracks, limit = 2)
+
+        assertEquals(listOf("Album 5", "Album 4"), recent.map { it.name })
+    }
+
+    /**
+     * A track backed by a real file.
+     *
+     * Recency is read from the file's modification time, and setting that on a path that does not
+     * exist silently does nothing — which would make these tests pass for the wrong reason.
+     */
+    private fun realTrack(name: String, album: String, modified: Long): LibraryTrack {
+        val file = folder.newFile(name)
+        file.writeBytes(ByteArray(1))
+        file.setLastModified(modified)
+
+        return LibraryTrack(file = file, title = name, artist = "A", album = album, size = 1)
     }
 }

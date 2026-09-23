@@ -40,6 +40,18 @@ object LibraryGrouping {
             .map { (name, group) -> Artist(name, group.sortedBy { it.title.lowercase() }) }
             .sortedBy { it.name.lowercase() }
 
+    /**
+     * Albums ordered by when their newest track arrived.
+     *
+     * The library sorts by title, which is right for browsing and useless for "what did I just
+     * get". This is the ordering Home needs, and it is why it is derived from the files rather
+     * than stored: a download's arrival time is already on disk.
+     */
+    fun recentAlbums(tracks: List<LibraryTrack>, limit: Int): List<Album> =
+        albums(tracks)
+            .sortedByDescending { album -> album.tracks.maxOf { it.file.lastModified() } }
+            .take(limit)
+
     private fun sharedArtist(tracks: List<LibraryTrack>): String {
         val artists = tracks.map { it.artist.orUnknown(UNKNOWN_ARTIST) }.distinct()
         return if (artists.size == 1) artists.single() else VARIOUS_ARTISTS

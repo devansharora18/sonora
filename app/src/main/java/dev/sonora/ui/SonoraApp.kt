@@ -103,7 +103,8 @@ fun SonoraApp() {
 
     when (val current = state) {
         is BackendState.Connected -> {
-            var tab by remember { mutableStateOf(MainTab.Search) }
+            // Home first: it is where resuming and finding new music both start.
+            var tab by remember { mutableStateOf(MainTab.Home) }
             var playerOpen by remember { mutableStateOf(false) }
             var addTarget by remember { mutableStateOf<LibraryTrack?>(null) }
             val playback by SonoraPlayer.state.collectAsState()
@@ -149,7 +150,14 @@ fun SonoraApp() {
                 ) {
                 Box(modifier = Modifier.weight(1f)) {
                     when (tab) {
-                        MainTab.Home -> HomeScreen()
+                        MainTab.Home -> HomeScreen(
+                            onRunSearch = { term ->
+                                // A suggestion on Home is really a pre-filled search, so this is
+                                // the whole action: go to Search and run it.
+                                tab = MainTab.Search
+                                SonoraBackend.search(context, term)
+                            },
+                        )
                         MainTab.Search -> SearchScreen()
                         MainTab.Library -> LibraryScreen()
                         MainTab.Settings -> SettingsScreen()
