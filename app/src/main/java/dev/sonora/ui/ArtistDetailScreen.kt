@@ -13,8 +13,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MusicNote
@@ -26,23 +29,68 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sonora.backend.LibraryGrouping
 import dev.sonora.backend.SearchQueries
+import dev.sonora.backend.SonoraBackend
+import dev.sonora.metadata.ReleaseGroup
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+/**
+ * Cover art for a catalogue release, loaded off the main thread and cached on disk.
+ *
+ * Nothing is drawn until it arrives, so a card without a cover shows the placeholder rather than
+ * flashing one and replacing it.
+ */
+@Composable
+private fun rememberCoverArt(releaseGroupId: String): ImageBitmap? {
+    val context = LocalContext.current
+    var artwork by remember(releaseGroupId) { mutableStateOf<ImageBitmap?>(null) }
+
+    LaunchedEffect(releaseGroupId) {
+        if (releaseGroupId.isEmpty()) return@LaunchedEffect
+
+        artwork = withContext(Dispatchers.IO) {
+            SonoraBackend.coverArt(context, releaseGroupId)
+        }
+    }
+
+    return artwork
+}
 
 /** One artist's tracks, reached from the Artists list. */
 @Composable
 fun ArtistDetailScreen(
     artist: LibraryGrouping.Artist,
+    missing: List<ReleaseGroup>?,
     onBack: () -> Unit,
     onPlayFrom: (Int) -> Unit,
     onFindMore: (String) -> Unit,
 ) {
+    val context = LocalContext.current
     val albumCount = LibraryGrouping.albums(artist.tracks).size
+
+    // Looked up once per artist. Every answer is cached, so this costs two requests the first
+    // time and nothing afterwards.
+    LaunchedEffect(artist.name) {
+        SonoraBackend.loadMissingAlbums(
+            context = context,
+            artist = artist.name,
+            owned = LibraryGrouping.albums(artist.tracks).map { it.name },
+        )
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -138,11 +186,48 @@ fun ArtistDetailScreen(
             }
         }
 
+        // The catalogue row is a lazy item so it scrolls with the tracks — but the item itself is
+        // registered from the start, even when there is nothing to show. Adding a new first item to
+        // a list that has already been laid out makes the list keep the item that was on top in
+        // place, which pushes the new one above the viewport: the row was built, and invisible.
+        // An item that is always present just grows when the answer arrives.
         LazyColumn(
             modifier = Modifier.weight(1f),
             contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
+            item(key = "catalogue") {
+                if (!missing.isNullOrEmpty()) {
+                    Column(modifier = Modifier.padding(bottom = 8.dp)) {
+                        SectionHeader(
+                            title = "Albums you don't have",
+                            subtitle = "From MusicBrainz; tap to look for it",
+                        )
+
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(missing, key = { it.id.ifEmpty { it.title } }) { release ->
+                                MediaCard(
+                                    artwork = rememberCoverArt(release.id),
+                                    title = release.title,
+                                    subtitle = release.year ?: "Album",
+                                    shape = RoundedCornerShape(8.dp),
+                                    // A catalogue entry is not playable — nothing here has been
+                                    // downloaded — so tapping it searches instead.
+                                    onClick = {
+                                        onFindMore(
+                                            SearchQueries.forAlbum(release.title, artist.name),
+                                        )
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             itemsIndexed(artist.tracks, key = { _, track -> track.file.absolutePath }) { index, track ->
                 TrackListRow(
                     track = track,

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MusicNote
@@ -29,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.style.TextAlign
@@ -45,6 +47,88 @@ import java.io.File
  * Library and a playlist are the same kind of list and drift apart the moment the row shape is
  * defined twice.
  */
+
+/**
+ * A section heading: what the row is, and one line saying why it is there.
+ */
+@Composable
+internal fun SectionHeader(title: String, subtitle: String) {
+    Column(modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp)) {
+        Text(text = title, style = MaterialTheme.typography.titleMedium)
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * The card shape a row of suggestions uses: artwork, a two-line title, then a quiet subtitle.
+ *
+ * Artwork is passed as a bitmap because the two sources differ — the library reads it from the
+ * file, the catalogue fetches it — and only the caller knows which.
+ */
+@Composable
+internal fun MediaCard(
+    artwork: ImageBitmap?,
+    title: String,
+    subtitle: String,
+    shape: RoundedCornerShape,
+    onClick: () -> Unit,
+    icon: ImageVector? = null,
+) {
+    Column(
+        modifier = Modifier
+            .width(140.dp)
+            .clickable(onClick = onClick),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(140.dp)
+                .clip(shape)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                artwork != null -> Image(
+                    bitmap = artwork,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                )
+
+                icon != null -> Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(40.dp),
+                )
+
+                else -> Icon(
+                    imageVector = Icons.Filled.MusicNote,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(40.dp),
+                )
+            }
+        }
+
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
 
 /** The 56dp leading square shared by track and playlist rows, so the lists line up. */
 @Composable

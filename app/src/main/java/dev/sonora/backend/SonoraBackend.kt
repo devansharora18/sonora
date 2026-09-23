@@ -1,10 +1,20 @@
 package dev.sonora.backend
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.util.Log
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import dev.sonora.metadata.CoverArtCache
+import dev.sonora.metadata.CoverArtTransport
+import dev.sonora.metadata.Discovery
+import dev.sonora.metadata.MetadataStore
+import dev.sonora.metadata.MusicBrainzClient
+import dev.sonora.metadata.MusicBrainzTransport
+import dev.sonora.metadata.ReleaseGroup
 import dev.sonora.protocol.DownloadOutcome
 import dev.sonora.protocol.SoulseekSession
 import dev.sonora.protocol.server.LoginResponse
@@ -58,6 +68,8 @@ object SonoraBackend {
     private const val PLAYLISTS_FILE = "playlists.json"
     private const val SETTINGS_FILE = "settings.json"
     private const val SEARCH_HISTORY_FILE = "searches.json"
+    private const val METADATA_CACHE_DIRECTORY = "metadata"
+    private const val COVER_ART_CACHE_DIRECTORY = "covers"
     private const val MAX_FILENAME_LENGTH = 180
     private const val PROGRESS_POLL_MS = 400L
 
@@ -99,6 +111,20 @@ object SonoraBackend {
     private val _searchHistory = MutableStateFlow<List<String>>(emptyList())
 
     val searchHistory: StateFlow<List<String>> = _searchHistory.asStateFlow()
+
+    /**
+     * Albums MusicBrainz lists for an artist that the library does not hold, keyed by artist.
+     *
+     * Absent means "not looked up yet" or "could not be reached", never "nothing missing" — an
+     * empty list is a real answer, and the two must not look the same to the UI.
+     */
+    private val _missingAlbums = MutableStateFlow<Map<String, List<ReleaseGroup>>>(emptyMap())
+
+    val missingAlbums: StateFlow<Map<String, List<ReleaseGroup>>> = _missingAlbums.asStateFlow()
+
+    private var brainz: MusicBrainzClient? = null
+
+    private var coverArt: CoverArtCache? = null
 
     /**
      * Rescans the download directory.
@@ -347,6 +373,52 @@ object SonoraBackend {
         SearchHistoryStore(File(context.filesDir, SEARCH_HISTORY_FILE))
 
     /**
+     * Cover art for a catalogue release, or null when it has none.
+     *
+     * Blocking, so callers hand it to a coroutine on the IO dispatcher: it may fetch, and every
+     * answer is cached on disk, including "this release has no cover".
+     */
+    fun coverArt(context: Context, releaseGroupId: String): ImageBitmap? {
+        val cache = coverArt ?: CoverArtCache(
+            directory = File(context.filesDir, COVER_ART_CACHE_DIRECTORY),
+            fetch = CoverArtTransport(onTrace = { Log.d(TAG, "coverart: $it") }),
+        ).also { coverArt = it }
+
+        val bytes = cache.load(releaseGroupId) ?: return null
+
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+    }
+
+    /**
+     * Looks up what else an artist released, once.
+     *
+     * Every answer is cached on disk, so this is two requests the first time an artist is opened
+     * and none afterwards. A lookup that fails is not recorded, so it is retried rather than
+     * remembered as "nothing missing".
+     */
+    fun loadMissingAlbums(context: Context, artist: String, owned: List<String>) {
+        if (_missingAlbums.value.containsKey(artist)) return
+
+        scope.launch {
+            val client = brainz ?: MusicBrainzClient(
+                store = MetadataStore(File(context.filesDir, METADATA_CACHE_DIRECTORY)),
+                fetch = MusicBrainzTransport(onTrace = { Log.d(TAG, "musicbrainz: $it") }),
+            ).also { brainz = it }
+
+            val releases = client.studioAlbums(artist)
+            if (releases == null) {
+                Log.d(TAG, "musicbrainz: no discography for $artist")
+                return@launch
+            }
+
+            val missing = Discovery.missingAlbums(owned, releases)
+            Log.d(TAG, "musicbrainz: $artist -> ${releases.size} release(s), ${missing.size} missing")
+
+            _missingAlbums.update { it + (artist to missing) }
+        }
+    }
+
+    /**
      * Queues a search result for download.
      *
      * Queued rather than refused when something is already transferring, so a bulk request can
@@ -578,8 +650,7 @@ object SonoraBackend {
         }
     }
 
-    /** Remembers a query so the search screen can offer it again. */
-    private fun recordSearch(context: Context, query: String) {
+    /** Remembers a query so the search screen can offer it again. */    private fun recordSearch(context: Context, query: String) {
         editSearchHistory(context) { SearchHistory.record(it, query) }
     }
 

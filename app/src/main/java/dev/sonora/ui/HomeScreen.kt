@@ -143,8 +143,10 @@ private fun Section(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(albums, key = { it.name + it.artist }) { album ->
+                val file = album.tracks.firstOrNull()?.file
+
                 MediaCard(
-                    artworkFile = album.tracks.firstOrNull()?.file,
+                    artwork = if (file != null) rememberArtwork(file) else null,
                     title = album.name,
                     subtitle = album.artist,
                     shape = RoundedCornerShape(8.dp),
@@ -170,7 +172,7 @@ private fun PlaylistsRow(playlists: List<Playlist>, byPath: List<LibraryTrack>) 
                 val liked = playlist.id == Playlists.LIKED_ID
 
                 MediaCard(
-                    artworkFile = null,
+                    artwork = null,
                     icon = if (liked) Icons.Filled.Favorite else Icons.AutoMirrored.Filled.QueueMusic,
                     title = playlist.name,
                     subtitle = run {
@@ -196,7 +198,7 @@ private fun RecentSearchesRow(history: List<String>, onRunSearch: (String) -> Un
         ) {
             items(history, key = { it }) { term ->
                 MediaCard(
-                    artworkFile = null,
+                    artwork = null,
                     icon = Icons.Filled.Search,
                     title = term,
                     subtitle = "Search again",
@@ -208,86 +210,7 @@ private fun RecentSearchesRow(history: List<String>, onRunSearch: (String) -> Un
     }
 }
 
-@Composable
-private fun SectionHeader(title: String, subtitle: String) {
-    Column(modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp)) {
-        Text(text = title, style = MaterialTheme.typography.titleMedium)
-        Text(
-            text = subtitle,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
 
-/**
- * The card shape YT Music uses for a row: artwork, a two-line title, then a quiet subtitle.
- *
- * A card without artwork falls back to an icon rather than a broken image, which is what
- * playlists and searches are.
- */
-@Composable
-private fun MediaCard(
-    artworkFile: File?,
-    title: String,
-    subtitle: String,
-    shape: RoundedCornerShape,
-    onClick: () -> Unit,
-    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
-) {
-    Column(
-        modifier = Modifier
-            .width(140.dp)
-            .clickable(onClick = onClick),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(140.dp)
-                .clip(shape)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center,
-        ) {
-            val artwork = if (artworkFile != null) rememberArtwork(artworkFile) else null
-
-            when {
-                artwork != null -> Image(
-                    bitmap = artwork,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                )
-
-                icon != null -> Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(40.dp),
-                )
-
-                else -> Icon(
-                    imageVector = Icons.Filled.MusicNote,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(40.dp),
-                )
-            }
-        }
-
-        Text(
-            text = title,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 8.dp),
-        )
-        Text(
-            text = subtitle,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
 
 @Composable
 private fun DownloadingCard(filename: String, fraction: Float?, remaining: Int) {

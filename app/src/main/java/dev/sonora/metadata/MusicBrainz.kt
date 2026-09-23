@@ -61,6 +61,8 @@ object MusicBrainz {
 /** A release MusicBrainz knows about. */
 @Serializable
 data class ReleaseGroup(
+    /** MusicBrainz's identifier for this release, and what the cover art is looked up by. */
+    val id: String = "",
     val title: String,
     @SerialName("first-release-date") val firstReleaseDate: String? = null,
     @SerialName("primary-type") val primaryType: String? = null,

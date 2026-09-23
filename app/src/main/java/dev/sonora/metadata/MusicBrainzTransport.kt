@@ -14,6 +14,8 @@ import java.net.URL
 class MusicBrainzTransport(
     private val now: () -> Long = System::currentTimeMillis,
     private val sleep: (Long) -> Unit = { Thread.sleep(it) },
+    /** Every real request, so "how few fetches" can be measured rather than assumed. */
+    private val onTrace: (String) -> Unit = {},
 ) : (String) -> String? {
 
     @Volatile
@@ -21,6 +23,7 @@ class MusicBrainzTransport(
 
     override fun invoke(url: String): String? {
         spaceRequests()
+        onTrace(url)
 
         return runCatching {
             val connection = (URL(url).openConnection() as HttpURLConnection).apply {

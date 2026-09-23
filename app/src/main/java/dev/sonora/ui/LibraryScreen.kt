@@ -95,6 +95,7 @@ fun LibraryScreen(onRunSearch: (String) -> Unit) {
     val likedPaths = remember(playlists) { Playlists.likedPaths(playlists) }
     val albums = remember(tracks) { LibraryGrouping.albums(tracks) }
     val artists = remember(tracks) { LibraryGrouping.artists(tracks) }
+    val missingAlbums by SonoraBackend.missingAlbums.collectAsState()
 
     // Delete is only offered for files in the download folder. Now that the library also lists music
     // from the rest of the device, offering to delete someone's own collection would be wrong.
@@ -122,6 +123,7 @@ fun LibraryScreen(onRunSearch: (String) -> Unit) {
         BackHandler { openArtist = null }
         ArtistDetailScreen(
             artist = artist,
+            missing = missingAlbums[artist.name],
             onBack = { openArtist = null },
             onPlayFrom = { index -> SonoraPlayer.play(context, artist.tracks, index) },
             onFindMore = onRunSearch,
