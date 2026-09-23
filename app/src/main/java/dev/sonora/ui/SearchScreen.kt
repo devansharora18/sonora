@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -61,6 +62,8 @@ import dev.sonora.backend.DownloadState
 import dev.sonora.backend.SearchHit
 import dev.sonora.backend.SearchFolders
 import dev.sonora.backend.SearchQueries
+import dev.sonora.backend.SearchSource
+import dev.sonora.backend.SearchState
 import dev.sonora.backend.SonoraBackend
 import dev.sonora.backend.SortMode
 import dev.sonora.ui.theme.accentText
@@ -74,6 +77,7 @@ fun SearchScreen() {
     val settings by SonoraBackend.settings.collectAsState()
     val history by SonoraBackend.searchHistory.collectAsState()
     val catalogue by SonoraBackend.catalogue.collectAsState()
+    val sources by SonoraBackend.searchSources.collectAsState()
 
     // Keyed on the committed query so clearing the search clears the box with it, rather than
     // leaving stale text above an empty result list.
@@ -91,6 +95,11 @@ fun SearchScreen() {
     // Nothing searched yet: the recent queries are the useful thing to show, rather than an
     // instruction to go and do something.
     val showingHistory = searchState.query.isBlank() && !searchState.searching
+
+    // Either source can be turned off. The search itself still asks both: the catalogue answer is
+    // cached, and switching back should not mean waiting for it again.
+    val showSoulseek = SearchSource.SOULSEEK in sources
+    val catalogueShown = SearchSource.CATALOGUE in sources && catalogue.isNotEmpty()
 
     // Asked once, before the first download. Where the files land decides whether they survive
     // uninstalling the app, so it is worth one question rather than a silent default.
@@ -137,33 +146,27 @@ fun SearchScreen() {
             onSearch = { SonoraBackend.search(context, query.trim()) },
         )
 
-        if (searchState.hits.isNotEmpty() || searchState.searching) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+        // Ordering only means anything for the peer results, so it is offered only when those are
+        // the ones on show.
+        if (showSoulseek && (searchState.hits.isNotEmpty() || searchState.searching)) {
+            ChipRow {
                 SortMode.entries.forEach { mode ->
-                    FilterChip(
+                    SearchChip(
+                        label = mode.label,
                         selected = sort == mode,
                         onClick = { onSort(mode) },
-                        label = { Text(mode.label, style = MaterialTheme.typography.labelMedium) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            selectedContainerColor = MaterialTheme.colorScheme.primary,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                        ),
-                        border = BorderStroke(
-                            width = 1.dp,
-                            color = if (sort == mode) {
-                                MaterialTheme.colorScheme.accentText
-                            } else {
-                                MaterialTheme.colorScheme.outline
-                            },
-                        ),
+                    )
+                }
+            }
+        }
+
+        if (catalogue.isNotEmpty() || searchState.hits.isNotEmpty() || searchState.searching) {
+            ChipRow {
+                SearchSource.entries.forEach { source ->
+                    SearchChip(
+                        label = source.label,
+                        selected = source in sources,
+                        onClick = { SonoraBackend.setSearchSource(source, source !in sources) },
                     )
                 }
             }
@@ -174,15 +177,7 @@ fun SearchScreen() {
             onCancelRemaining = { SonoraBackend.cancelPendingDownloads() },
         )
 
-        when {
-            searchState.searching -> Note("Searching\u2026 ${searchState.matched} match(es) so far")
-
-            showingHistory -> Unit
-
-            searchState.hits.isEmpty() -> Note("No results for \u201c${searchState.query}\u201d.")
-
-            else -> Note("${searchState.matched} match(es) from ${searchState.peers} peer(s)")
-        }
+        statusNote(searchState, showSoulseek, catalogueShown)?.let { Note(it) }
 
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             if (showingHistory) {
@@ -225,7 +220,7 @@ fun SearchScreen() {
                 // been laid out makes the list keep what was on top in place, which pushes the new
                 // row above the viewport — and this row always arrives after the search has begun.
                 item(key = "catalogue") {
-                    if (catalogue.isNotEmpty()) {
+                    if (catalogueShown) {
                         Column(modifier = Modifier.padding(bottom = 8.dp)) {
                             SectionHeader(
                                 title = "In the catalogue",
@@ -265,16 +260,18 @@ fun SearchScreen() {
                     }
                 }
 
-                items(searchState.hits, key = { it.peer + it.filename }) { hit ->
-                    ResultRow(
-                        hit = hit,
-                        folderSize = SearchFolders.folderOf(searchState.hits, hit).size,
-                        onDownload = { startDownload(hit) },
-                        onDownloadFolder = {
-                            SearchFolders.folderOf(searchState.hits, hit)
-                                .forEach { startDownload(it) }
-                        },
-                    )
+                if (showSoulseek) {
+                    items(searchState.hits, key = { it.peer + it.filename }) { hit ->
+                        ResultRow(
+                            hit = hit,
+                            folderSize = SearchFolders.folderOf(searchState.hits, hit).size,
+                            onDownload = { startDownload(hit) },
+                            onDownloadFolder = {
+                                SearchFolders.folderOf(searchState.hits, hit)
+                                    .forEach { startDownload(it) }
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -319,6 +316,69 @@ fun SearchScreen() {
         )
     }
 }
+
+/**
+ * One of the chips above the results: how they are ordered, and which sources are shown.
+ *
+ * Shared by both rows so the two read as one set of controls rather than two styles of button.
+ */
+@Composable
+private fun SearchChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label, style = MaterialTheme.typography.labelMedium) },
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            selectedContainerColor = MaterialTheme.colorScheme.primary,
+            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+        ),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (selected) {
+                MaterialTheme.colorScheme.accentText
+            } else {
+                MaterialTheme.colorScheme.outline
+            },
+        ),
+    )
+}
+
+/** A row of chips that scrolls sideways when there are more than fit across. */
+@Composable
+private fun ChipRow(content: @Composable RowScope.() -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        content = content,
+    )
+}
+
+/**
+ * The line under the controls, or null when there is nothing worth saying.
+ *
+ * It only ever describes the peer results, so it stays quiet while those are hidden. "No results"
+ * especially has to mean no results from anywhere: said above a row of catalogue matches it would
+ * read as a flat contradiction.
+ */
+internal fun statusNote(state: SearchState, showSoulseek: Boolean, catalogueShown: Boolean): String? =
+    when {
+        // Nothing has been searched for, so there is no result to describe.
+        state.query.isBlank() -> null
+
+        state.searching && showSoulseek -> "Searching\u2026 ${state.matched} match(es) so far"
+
+        state.hits.isEmpty() && !catalogueShown -> "No results for \u201c${state.query}\u201d."
+
+        state.hits.isNotEmpty() && showSoulseek ->
+            "${state.matched} match(es) from ${state.peers} peer(s)"
+
+        else -> null
+    }
 
 @Composable
 private fun SearchBar(

@@ -11,6 +11,18 @@ enum class SortMode(val label: String) {
     SIZE("Largest"),
 }
 
+/**
+ * Where a result came from.
+ *
+ * The two are answered by different networks. MusicBrainz knows what exists and can describe an
+ * album nobody on Soulseek is sharing; Soulseek has the files. Which one is worth looking at
+ * depends entirely on what is being looked for, so the search screen can show either or both.
+ */
+enum class SearchSource(val label: String) {
+    CATALOGUE("Catalogue"),
+    SOULSEEK("Soulseek"),
+}
+
 /** One file offered by one peer, as shown in a results list. */
 data class SearchHit(
     val peer: String,

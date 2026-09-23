@@ -132,6 +132,16 @@ object SonoraBackend {
 
     val catalogue: StateFlow<List<ReleaseGroup>> = _catalogue.asStateFlow()
 
+    /**
+     * Which sources the search screen shows.
+     *
+     * Held apart from [SearchState] so it outlives a search. It says what is worth looking at, not
+     * what one query turned up, and a filter that reset itself on every search would be useless.
+     */
+    private val _searchSources = MutableStateFlow(SearchSource.entries.toSet())
+
+    val searchSources: StateFlow<Set<SearchSource>> = _searchSources.asStateFlow()
+
     private var brainz: MusicBrainzClient? = null
 
     private var coverArt: CoverArtCache? = null
@@ -712,6 +722,16 @@ object SonoraBackend {
             val tokens = state.query.lowercase().split(WHITESPACE).filter { it.isNotEmpty() }
             state.copy(sort = mode, hits = order(state.hits, tokens, mode))
         }
+    }
+
+    /**
+     * Shows or hides one source on the search screen.
+     *
+     * A view filter rather than a search filter: the other source is still asked, because the
+     * answer is cached and switching back should not mean waiting again.
+     */
+    fun setSearchSource(source: SearchSource, enabled: Boolean) {
+        _searchSources.update { if (enabled) it + source else it - source }
     }
 
     private fun order(
