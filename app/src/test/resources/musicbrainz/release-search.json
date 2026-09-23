@@ -1,0 +1,86 @@
+{
+  "count": 22098,
+  "offset": 0,
+  "release-groups": [
+    {
+      "id": "3ac5236a-3bd8-44c6-ab60-69b013594ae6",
+      "title": "Happier Than Ever",
+      "primary-type": "Album",
+      "secondary-types": [],
+      "first-release-date": "2021-07-30",
+      "artist-credit": [
+        {
+          "name": "Billie Eilish"
+        }
+      ]
+    },
+    {
+      "id": "cc37db9a-e4a8-43e7-9039-f6da8b2357bf",
+      "title": "happier than ever",
+      "primary-type": "Album",
+      "secondary-types": [
+        "Compilation"
+      ],
+      "first-release-date": "2021-11-18",
+      "artist-credit": [
+        {
+          "name": "Various Artists"
+        }
+      ]
+    },
+    {
+      "id": "07b12d09-f25f-43ec-9361-600f373843d4",
+      "title": "Happier Than Ever: Acapellas",
+      "primary-type": "Album",
+      "secondary-types": [
+        "Remix"
+      ],
+      "first-release-date": "2021",
+      "artist-credit": [
+        {
+          "name": "Billie Eilish"
+        }
+      ]
+    },
+    {
+      "id": "6e5a2eb5-fc4d-46e0-a320-b622f8effb54",
+      "title": "WHEN WE ALL FALL ASLEEP, WHERE DO WE GO? / Happier Than Ever",
+      "primary-type": "Album",
+      "secondary-types": [
+        "Compilation"
+      ],
+      "first-release-date": "2022-06-10",
+      "artist-credit": [
+        {
+          "name": "Billie Eilish"
+        }
+      ]
+    },
+    {
+      "id": "52a9f609-e703-4f3b-bd9b-c924f0012411",
+      "title": "Happier Than Everybody Else",
+      "primary-type": "Album",
+      "secondary-types": [],
+      "first-release-date": "2005-02-17",
+      "artist-credit": [
+        {
+          "name": "Suzy Callahan"
+        }
+      ]
+    },
+    {
+      "id": "27bef453-fcbf-3b67-99be-53d85c03ae71",
+      "title": "Greater Than Ever",
+      "primary-type": "Album",
+      "secondary-types": [
+        "Compilation"
+      ],
+      "first-release-date": "2002",
+      "artist-credit": [
+        {
+          "name": "Baseball Furies"
+        }
+      ]
+    }
+  ]
+}

@@ -120,6 +120,88 @@ class MusicBrainzClientTest {
         MusicBrainzClient(MetadataStore(folder.newFolder()), fetch)
 }
 
+class MusicBrainzSearchTest {
+
+    @get:Rule
+    val folder = TemporaryFolder()
+
+    /** The real search response for "Happier Than Ever", trimmed to keep the file small. */
+    private val releaseSearch: String = checkNotNull(
+        javaClass.getResourceAsStream("/musicbrainz/release-search.json"),
+    ).bufferedReader().readText()
+
+    @Test
+    fun `a search finds the album and not the look-alikes`() {
+        // The response also holds a compilation, a remix set, "Happier Than Everybody Else" and
+        // "Greater Than Ever" — all of them studio albums, none of them what was asked for.
+        val albums = MusicBrainz.parseReleases(releaseSearch, "Happier Than Ever")
+
+        assertEquals(listOf("Happier Than Ever"), albums.map { it.title })
+    }
+
+    @Test
+    fun `a search result says who it is by`() {
+        val album = MusicBrainz.parseReleases(releaseSearch, "Happier Than Ever").single()
+
+        assertEquals("Billie Eilish", album.artistName)
+        assertEquals("2021", album.year)
+    }
+
+    @Test
+    fun `a half-typed title still finds the album, best match first`() {
+        // Deliberately looser: both words are in "Happier Than Everybody Else" too, and a half
+        // typed title is not grounds for hiding a title that does contain what was typed.
+        val albums = MusicBrainz.parseReleases(releaseSearch, "happier than")
+
+        assertEquals("Happier Than Ever", albums.first().title)
+        assertEquals("Billie Eilish", albums.first().artistName)
+    }
+
+    @Test
+    fun `a query whose words are not in a title matches nothing`() {
+        // MusicBrainz scores this 100 against an album called "Nonsense", so the score cannot be
+        // what decides it.
+        val albums = MusicBrainz.parseReleases(releaseSearch, "zzqxx nonsense")
+
+        assertEquals(emptyList<String>(), albums.map { it.title })
+    }
+
+    @Test
+    fun `a query with no words in it matches nothing`() {
+        val albums = MusicBrainz.parseReleases(releaseSearch, "!!")
+
+        assertEquals(emptyList<String>(), albums.map { it.title })
+    }
+
+    @Test
+    fun `the search asks for albums only`() {
+        val url = MusicBrainz.releaseSearchUrl("Happier Than Ever")
+
+        assertTrue(url, url.startsWith("https://musicbrainz.org/ws/2/release-group?"))
+        assertTrue(url, url.contains("query=Happier+Than+Ever+AND+primarytype%3Aalbum"))
+        assertTrue(url, url.endsWith("&fmt=json"))
+    }
+
+    @Test
+    fun `a search is fetched once and then served from the cache`() {
+        var fetches = 0
+        val client = MusicBrainzClient(MetadataStore(folder.newFolder())) { fetches++; releaseSearch }
+
+        val first = client.searchAlbums("Happier Than Ever")
+        client.searchAlbums("Happier Than Ever")
+
+        assertEquals(listOf("Happier Than Ever"), first?.map { it.title })
+        assertEquals(1, fetches)
+    }
+
+    @Test
+    fun `an unreachable MusicBrainz reports nothing rather than throwing`() {
+        val client = MusicBrainzClient(MetadataStore(folder.newFolder())) { null }
+
+        assertNull(client.searchAlbums("Happier Than Ever"))
+    }
+}
+
 class MetadataStoreTest {
 
     @get:Rule

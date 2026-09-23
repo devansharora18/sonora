@@ -32,6 +32,18 @@ class MusicBrainzClient(
     }
 
     /**
+     * Studio albums matching [query], or null when MusicBrainz could not be reached.
+     *
+     * One request, and none at all once that query has been searched: the catalogue changes
+     * slowly, so an answer kept is an answer not fetched again.
+     */
+    fun searchAlbums(query: String): List<ReleaseGroup>? {
+        val body = cached(MusicBrainz.releaseSearchUrl(query), TTL_SEARCH) ?: return null
+
+        return MusicBrainz.parseReleases(body, query)
+    }
+
+    /**
      * Cache first, then network.
      *
      * A failed fetch is deliberately not cached, so a temporary outage is retried rather than
@@ -52,5 +64,8 @@ class MusicBrainzClient(
 
         /** Long, but short enough that a new album shows up without waiting forever. */
         private const val TTL_DISCOGRAPHY = 30L * 24 * 60 * 60 * 1000
+
+        /** A search is a question about a name, and the answer does not change. */
+        private const val TTL_SEARCH = 30L * 24 * 60 * 60 * 1000
     }
 }

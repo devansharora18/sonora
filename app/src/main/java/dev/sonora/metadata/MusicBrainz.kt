@@ -40,9 +40,51 @@ object MusicBrainz {
     fun discographyUrl(artistId: String): String =
         "$BASE/release-group?artist=${encode(artistId)}&type=album&limit=100&fmt=json"
 
+    /**
+     * Release groups whose name matches, restricted to albums at the source.
+     *
+     * The type restriction matters more than it looks. Without it the search returns singles and
+     * compilations that outrank the album itself, and "Happier Than Ever" comes back as a single.
+     */
+    fun releaseSearchUrl(query: String): String =
+        "$BASE/release-group?query=${encode("$query AND primarytype:album")}&limit=10&fmt=json"
+
     fun parseArtistId(body: String): String? = runCatching {
         json.decodeFromString<ArtistPage>(body).artists.firstOrNull()?.id
     }.getOrNull()
+
+    /**
+     * The studio albums whose title answers the query, best match first.
+     *
+     * MusicBrainz's score cannot do this filtering. It scores each result against its own title
+     * terms rather than against the query, so a search for "zzqxx nonsense" returns an album called
+     * "Nonsense" at full marks, and "Happier Than Ever" returns "Happier Than Everybody Else" as a
+     * perfectly good studio album. What separates the album the user meant from a coincidental
+     * title is whether the words they typed are in that title.
+     */
+    fun parseReleases(body: String, query: String): List<ReleaseGroup> {
+        val wanted = words(query)
+        if (wanted.isEmpty()) return emptyList()
+
+        return runCatching {
+            json.decodeFromString<ReleaseGroupPage>(body).groups.filter {
+                it.isStudioAlbum && words(it.title).containsAll(wanted)
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /**
+     * The words in a title, with case and punctuation set aside.
+     *
+     * Words rather than a plain substring, because "Happier Than Ever" is a prefix of "Happier Than
+     * Everybody Else" once punctuation is stripped — a substring test cannot tell those apart.
+     */
+    private fun words(text: String): List<String> =
+        text.lowercase()
+            .map { if (it.isLetterOrDigit()) it else ' ' }
+            .joinToString("")
+            .split(' ')
+            .filter { it.isNotEmpty() }
 
     /**
      * Studio albums: releases typed as an album with no secondary type.
@@ -67,6 +109,7 @@ data class ReleaseGroup(
     @SerialName("first-release-date") val firstReleaseDate: String? = null,
     @SerialName("primary-type") val primaryType: String? = null,
     @SerialName("secondary-types") val secondaryTypes: List<String> = emptyList(),
+    @SerialName("artist-credit") val artistCredit: List<ArtistCredit> = emptyList(),
 ) {
     /** True for a plain album: no live, compilation, remix or soundtrack tagging. */
     val isStudioAlbum: Boolean
@@ -74,7 +117,20 @@ data class ReleaseGroup(
 
     /** Just the year, since a full date is more precision than a card shows. */
     val year: String? get() = firstReleaseDate?.take(4)?.takeIf { it.length == 4 }
+
+    /**
+     * Who it is credited to, or empty.
+     *
+     * Only a search says this — a discography is asked for by artist, so it already knows. The
+     * search has to say it, because the same album title belongs to several different artists and
+     * the title alone does not say which one the user is looking at.
+     */
+    val artistName: String get() = artistCredit.joinToString(" & ") { it.name }
 }
+
+/** One credited artist on a release, as a search response spells it. */
+@Serializable
+data class ArtistCredit(val name: String = "")
 
 @Serializable
 private data class ArtistPage(val artists: List<Artist> = emptyList())
