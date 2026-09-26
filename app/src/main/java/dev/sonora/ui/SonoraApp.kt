@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -245,15 +246,21 @@ fun SonoraApp() {
                     visible = playerOpen,
                     enter = slideInVertically(
                         initialOffsetY = { fullHeight -> fullHeight },
-                        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+                        animationSpec = tween(
+                            durationMillis = 240,
+                            easing = CubicBezierEasing(0.1f, 1f, 0.1f, 1f),
+                        ),
                     ) + fadeIn(
-                        animationSpec = tween(durationMillis = 250),
+                        animationSpec = tween(durationMillis = 180),
                     ),
                     exit = slideOutVertically(
                         targetOffsetY = { fullHeight -> fullHeight },
-                        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+                        animationSpec = tween(
+                            durationMillis = 200,
+                            easing = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f),
+                        ),
                     ) + fadeOut(
-                        animationSpec = tween(durationMillis = 200),
+                        animationSpec = tween(durationMillis = 160),
                     ),
                 ) {
                     BackHandler { playerOpen = false }
