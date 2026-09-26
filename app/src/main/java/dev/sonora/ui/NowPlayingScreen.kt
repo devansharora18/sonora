@@ -36,6 +36,12 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -46,11 +52,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -81,8 +91,54 @@ fun NowPlayingScreen(
     }
 
     val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
+    val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
     val dismissThresholdPx = with(density) { 100.dp.toPx() }
+    val switchThresholdPx = with(density) { 70.dp.toPx() }
+
     var totalDragY by remember { mutableFloatStateOf(0f) }
+    var totalDragX by remember { mutableFloatStateOf(0f) }
+    val artOffset = remember { Animatable(0f) }
+    var isSwitching by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+
+    fun animateNext() {
+        if (isSwitching) return
+        isSwitching = true
+        coroutineScope.launch {
+            artOffset.animateTo(
+                targetValue = -screenWidthPx,
+                animationSpec = tween(180, easing = FastOutLinearInEasing),
+            )
+            SonoraPlayer.next()
+            artOffset.snapTo(screenWidthPx)
+            artOffset.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(250, easing = FastOutSlowInEasing),
+            )
+            totalDragX = 0f
+            isSwitching = false
+        }
+    }
+
+    fun animatePrevious() {
+        if (isSwitching) return
+        isSwitching = true
+        coroutineScope.launch {
+            artOffset.animateTo(
+                targetValue = screenWidthPx,
+                animationSpec = tween(180, easing = FastOutLinearInEasing),
+            )
+            SonoraPlayer.previous()
+            artOffset.snapTo(-screenWidthPx)
+            artOffset.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(250, easing = FastOutSlowInEasing),
+            )
+            totalDragX = 0f
+            isSwitching = false
+        }
+    }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -155,6 +211,35 @@ fun NowPlayingScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
+                    .graphicsLayer { translationX = artOffset.value }
+                    .draggable(
+                        orientation = Orientation.Horizontal,
+                        enabled = !isSwitching,
+                        state = rememberDraggableState { delta ->
+                            totalDragX += delta
+                            coroutineScope.launch {
+                                artOffset.snapTo(totalDragX)
+                            }
+                        },
+                        onDragStopped = { velocity ->
+                            if (totalDragX < -switchThresholdPx || velocity < -400f) {
+                                animateNext()
+                            } else if (totalDragX > switchThresholdPx || velocity > 400f) {
+                                animatePrevious()
+                            } else {
+                                coroutineScope.launch {
+                                    artOffset.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioLowBouncy,
+                                            stiffness = Spring.StiffnessMedium,
+                                        ),
+                                    )
+                                    totalDragX = 0f
+                                }
+                            }
+                        },
+                    )
                     .clip(RoundedCornerShape(8.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center,
@@ -297,7 +382,7 @@ fun NowPlayingScreen(
                     )
                 }
                 IconButton(
-                    onClick = { SonoraPlayer.previous() },
+                    onClick = { animatePrevious() },
                     modifier = Modifier.size(64.dp),
                 ) {
                     Icon(
@@ -320,7 +405,7 @@ fun NowPlayingScreen(
                     )
                 }
                 IconButton(
-                    onClick = { SonoraPlayer.next() },
+                    onClick = { animateNext() },
                     modifier = Modifier.size(64.dp),
                 ) {
                     Icon(
