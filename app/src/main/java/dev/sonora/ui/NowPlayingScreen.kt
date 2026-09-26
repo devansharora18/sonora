@@ -64,6 +64,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.sonora.backend.AudioQuality
 import dev.sonora.backend.RepeatMode
 import dev.sonora.backend.SonoraPlayer
 import dev.sonora.ui.theme.accentText
@@ -279,6 +280,17 @@ fun NowPlayingScreen(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                val quality = remember(track.file, duration) { AudioQuality.from(track.file, duration) }
+                if (quality.isNotBlank()) {
+                    Text(
+                        text = quality,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
             }
 
             Column(
