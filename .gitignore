@@ -24,3 +24,6 @@ local.properties
 keystore.properties
 *.jks
 *.keystore
+
+# Not part of the app: the landing page, and the output of the launch-video tool.
+brag-output-*/
