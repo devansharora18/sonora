@@ -80,6 +80,10 @@ fun LibraryScreen(
     openPlaylistId: String?,
     onOpenPlaylist: (String) -> Unit,
     onClosePlaylist: () -> Unit,
+    openArtistName: String? = null,
+    onCloseArtist: () -> Unit = {},
+    openAlbumName: String? = null,
+    onCloseAlbum: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val tracks by SonoraBackend.library.collectAsState()
@@ -114,27 +118,49 @@ fun LibraryScreen(
     // Held by id, not by value, so a rename or a removal is reflected immediately — and so a
     // deleted playlist closes the screen instead of showing a stale copy.
     val open = openPlaylistId?.let { id -> playlists.firstOrNull { it.id == id } }
-    val album = openAlbum
+    val album = openAlbum ?: openAlbumName?.let { name ->
+        albums.firstOrNull { it.name.equals(name, ignoreCase = true) }
+            ?: playback.track?.takeIf { it.album?.equals(name, ignoreCase = true) == true }?.let { t ->
+                LibraryGrouping.Album(name = name, artist = t.artist ?: LibraryGrouping.UNKNOWN_ARTIST, tracks = listOf(t))
+            }
+    }
 
     if (album != null) {
-        BackHandler { openAlbum = null }
+        BackHandler {
+            openAlbum = null
+            onCloseAlbum()
+        }
         AlbumDetailScreen(
             album = album,
-            onBack = { openAlbum = null },
+            onBack = {
+                openAlbum = null
+                onCloseAlbum()
+            },
             onPlayFrom = { index -> SonoraPlayer.play(context, album.tracks, index) },
             onFindMore = onRunSearch,
         )
         return
     }
 
-    val artist = openArtist
+    val artist = openArtist ?: openArtistName?.let { name ->
+        artists.firstOrNull { it.name.equals(name, ignoreCase = true) }
+            ?: playback.track?.takeIf { it.artist?.equals(name, ignoreCase = true) == true }?.let { t ->
+                LibraryGrouping.Artist(name = name, tracks = listOf(t))
+            }
+    }
 
     if (artist != null) {
-        BackHandler { openArtist = null }
+        BackHandler {
+            openArtist = null
+            onCloseArtist()
+        }
         ArtistDetailScreen(
             artist = artist,
             missing = missingAlbums[artist.name],
-            onBack = { openArtist = null },
+            onBack = {
+                openArtist = null
+                onCloseArtist()
+            },
             onPlayFrom = { index -> SonoraPlayer.play(context, artist.tracks, index) },
             onFindMore = onRunSearch,
         )

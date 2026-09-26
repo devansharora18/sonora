@@ -42,9 +42,11 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -58,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.launch
@@ -78,6 +81,8 @@ fun NowPlayingScreen(
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onOpenArtist: (String) -> Unit = {},
+    onOpenAlbum: (String) -> Unit = {},
 ) {
     val playback by SonoraPlayer.state.collectAsState()
     val track = playback.track ?: return
@@ -273,13 +278,41 @@ fun NowPlayingScreen(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    text = listOfNotNull(track.artist, track.album).joinToString("  ·  "),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val hasArtist = !track.artist.isNullOrBlank()
+                    val hasAlbum = !track.album.isNullOrBlank()
+
+                    if (hasArtist && hasAlbum) {
+                        BlinkableText(
+                            text = track.artist!!,
+                            onClick = { onOpenArtist(track.artist) },
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        Text(
+                            text = "  ·  ",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        BlinkableText(
+                            text = track.album!!,
+                            onClick = { onOpenAlbum(track.album) },
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                    } else if (hasArtist) {
+                        BlinkableText(
+                            text = track.artist!!,
+                            onClick = { onOpenArtist(track.artist) },
+                        )
+                    } else if (hasAlbum) {
+                        BlinkableText(
+                            text = track.album!!,
+                            onClick = { onOpenAlbum(track.album) },
+                        )
+                    }
+                }
                 val quality = remember(track.file, duration) { AudioQuality.from(track.file, duration) }
                 if (quality.isNotBlank()) {
                     Text(
@@ -462,3 +495,38 @@ private fun formatMillis(value: Long): String {
     val totalSeconds = (value / 1000L).coerceAtLeast(0L)
     return "${totalSeconds / 60}:${(totalSeconds % 60).toString().padStart(2, '0')}"
 }
+
+@Composable
+private fun BlinkableText(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val coroutineScope = rememberCoroutineScope()
+    val flash = remember { Animatable(0f) }
+    var isBlinking by remember { mutableStateOf(false) }
+    val baseColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val currentColor = lerp(baseColor, MaterialTheme.colorScheme.onSurface, flash.value)
+
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyLarge,
+        color = currentColor,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier.clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+        ) {
+            if (isBlinking) return@clickable
+            isBlinking = true
+            coroutineScope.launch {
+                flash.animateTo(1f, animationSpec = tween(durationMillis = 80))
+                onClick()
+                flash.animateTo(0f, animationSpec = tween(durationMillis = 120))
+                isBlinking = false
+            }
+        },
+    )
+}
+
