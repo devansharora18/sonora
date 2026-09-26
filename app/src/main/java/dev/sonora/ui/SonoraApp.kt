@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -140,6 +141,8 @@ fun SonoraApp() {
 
             // Held here rather than inside the Library so a playlist card on Home can open it.
             var openPlaylistId by remember { mutableStateOf<String?>(null) }
+            var openArtistName by remember { mutableStateOf<String?>(null) }
+            var openAlbumName by remember { mutableStateOf<String?>(null) }
             val playback by SonoraPlayer.state.collectAsState()
             val playlists by SonoraBackend.playlists.collectAsState()
             val likedPaths = remember(playlists) { Playlists.likedPaths(playlists) }
@@ -195,6 +198,10 @@ fun SonoraApp() {
                                 openPlaylistId = openPlaylistId,
                                 onOpenPlaylist = { openPlaylistId = it },
                                 onClosePlaylist = { openPlaylistId = null },
+                                openArtistName = openArtistName,
+                                onCloseArtist = { openArtistName = null },
+                                openAlbumName = openAlbumName,
+                                onCloseAlbum = { openAlbumName = null },
                             )
                             MainTab.Settings -> SettingsScreen()
                         }
@@ -218,7 +225,11 @@ fun SonoraApp() {
                                         // Leaving the Library closes whatever it had open. That state
                                         // used to live inside it and reset this way, and holding it up
                                         // here should not change what the user sees.
-                                        if (entry != MainTab.Library) openPlaylistId = null
+                                        if (entry != MainTab.Library) {
+                                            openPlaylistId = null
+                                            openArtistName = null
+                                            openAlbumName = null
+                                        }
                                         tab = entry
                                     }
                                 },
@@ -245,15 +256,21 @@ fun SonoraApp() {
                     visible = playerOpen,
                     enter = slideInVertically(
                         initialOffsetY = { fullHeight -> fullHeight },
-                        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+                        animationSpec = tween(
+                            durationMillis = 240,
+                            easing = CubicBezierEasing(0.1f, 1f, 0.1f, 1f),
+                        ),
                     ) + fadeIn(
-                        animationSpec = tween(durationMillis = 250),
+                        animationSpec = tween(durationMillis = 180),
                     ),
                     exit = slideOutVertically(
                         targetOffsetY = { fullHeight -> fullHeight },
-                        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+                        animationSpec = tween(
+                            durationMillis = 200,
+                            easing = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f),
+                        ),
                     ) + fadeOut(
-                        animationSpec = tween(durationMillis = 200),
+                        animationSpec = tween(durationMillis = 160),
                     ),
                 ) {
                     BackHandler { playerOpen = false }
@@ -266,6 +283,20 @@ fun SonoraApp() {
                         onToggleShuffle = { SonoraPlayer.toggleShuffle() },
                         onCycleRepeat = { SonoraPlayer.cycleRepeat() },
                         onAddToPlaylist = { addTarget = playback.track },
+                        onOpenArtist = { artistName ->
+                            openArtistName = artistName
+                            openAlbumName = null
+                            openPlaylistId = null
+                            tab = MainTab.Library
+                            playerOpen = false
+                        },
+                        onOpenAlbum = { albumName ->
+                            openAlbumName = albumName
+                            openArtistName = null
+                            openPlaylistId = null
+                            tab = MainTab.Library
+                            playerOpen = false
+                        },
                     )
                 }
             }
