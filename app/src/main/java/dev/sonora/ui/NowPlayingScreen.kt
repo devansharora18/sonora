@@ -34,20 +34,26 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.layout.statusBarsPadding
 import dev.sonora.backend.RepeatMode
 import dev.sonora.backend.SonoraPlayer
 import dev.sonora.ui.theme.accentText
@@ -74,11 +80,31 @@ fun NowPlayingScreen(
         0f
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .padding(start = 24.dp, top = 4.dp, end = 24.dp, bottom = 24.dp),
+    val density = LocalDensity.current
+    val dismissThresholdPx = with(density) { 100.dp.toPx() }
+    var totalDragY by remember { mutableFloatStateOf(0f) }
+
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .padding(start = 24.dp, top = 4.dp, end = 24.dp, bottom = 24.dp)
+                .draggable(
+                    orientation = Orientation.Vertical,
+                    state = rememberDraggableState { delta ->
+                        totalDragY += delta
+                    },
+                onDragStopped = { velocity ->
+                    if (totalDragY > dismissThresholdPx || velocity > 500f) {
+                        onClose()
+                    }
+                    totalDragY = 0f
+                },
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Row(
@@ -331,7 +357,9 @@ fun NowPlayingScreen(
             }
         }
     }
+    }
 }
+
 
 private fun formatMillis(value: Long): String {
     val totalSeconds = (value / 1000L).coerceAtLeast(0L)

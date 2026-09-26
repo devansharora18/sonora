@@ -5,6 +5,16 @@ import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,16 +57,23 @@ import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -69,6 +86,7 @@ import dev.sonora.backend.SonoraBackend
 import dev.sonora.backend.SonoraPlayer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -144,19 +162,7 @@ fun SonoraApp() {
                 }
             }
 
-            if (playerOpen) {
-                BackHandler { playerOpen = false }
-                NowPlayingScreen(
-                    onClose = { playerOpen = false },
-                    isLiked = playback.track?.let { it.file.absolutePath in likedPaths } == true,
-                    onToggleLike = {
-                        playback.track?.let { SonoraBackend.toggleLiked(context, it) }
-                    },
-                    onToggleShuffle = { SonoraPlayer.toggleShuffle() },
-                    onCycleRepeat = { SonoraPlayer.cycleRepeat() },
-                    onAddToPlaylist = { addTarget = playback.track },
-                )
-            } else {
+            Box(modifier = Modifier.fillMaxSize()) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -164,75 +170,103 @@ fun SonoraApp() {
                         // gone, so the status bar has to be inset here instead.
                         .statusBarsPadding(),
                 ) {
-                Box(modifier = Modifier.weight(1f)) {
-                    when (tab) {
-                        MainTab.Home -> HomeScreen(
-                            onRunSearch = { term ->
-                                // A suggestion on Home is really a pre-filled search, so this is
-                                // the whole action: go to Search and run it.
-                                tab = MainTab.Search
-                                SonoraBackend.search(context, term)
-                            },
-                            onOpenPlaylist = { id ->
-                                // The same handoff in the other direction: the playlist is shown by
-                                // the Library, so go there and ask it for that one.
-                                openPlaylistId = id
-                                tab = MainTab.Library
-                            },
-                        )
-                        MainTab.Search -> SearchScreen()
-                        MainTab.Library -> LibraryScreen(
-                            onRunSearch = { term ->
-                                tab = MainTab.Search
-                                SonoraBackend.search(context, term)
-                            },
-                            openPlaylistId = openPlaylistId,
-                            onOpenPlaylist = { openPlaylistId = it },
-                            onClosePlaylist = { openPlaylistId = null },
-                        )
-                        MainTab.Settings -> SettingsScreen()
+                    Box(modifier = Modifier.weight(1f)) {
+                        when (tab) {
+                            MainTab.Home -> HomeScreen(
+                                onRunSearch = { term ->
+                                    // A suggestion on Home is really a pre-filled search, so this is
+                                    // the whole action: go to Search and run it.
+                                    tab = MainTab.Search
+                                    SonoraBackend.search(context, term)
+                                },
+                                onOpenPlaylist = { id ->
+                                    // The same handoff in the other direction: the playlist is shown by
+                                    // the Library, so go there and ask it for that one.
+                                    openPlaylistId = id
+                                    tab = MainTab.Library
+                                },
+                            )
+                            MainTab.Search -> SearchScreen()
+                            MainTab.Library -> LibraryScreen(
+                                onRunSearch = { term ->
+                                    tab = MainTab.Search
+                                    SonoraBackend.search(context, term)
+                                },
+                                openPlaylistId = openPlaylistId,
+                                onOpenPlaylist = { openPlaylistId = it },
+                                onClosePlaylist = { openPlaylistId = null },
+                            )
+                            MainTab.Settings -> SettingsScreen()
+                        }
+                    }
+
+                    NowPlayingBar(onOpen = { playerOpen = true })
+
+                    NavigationBar(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        MainTab.entries.forEach { entry ->
+                            NavigationBarItem(
+                                selected = tab == entry,
+                                onClick = {
+                                    // Tapping Search while already on it clears the search, which is
+                                    // also what brings the recent queries back into view.
+                                    if (tab == entry && entry == MainTab.Search) {
+                                        SonoraBackend.clearSearch()
+                                    } else {
+                                        // Leaving the Library closes whatever it had open. That state
+                                        // used to live inside it and reset this way, and holding it up
+                                        // here should not change what the user sees.
+                                        if (entry != MainTab.Library) openPlaylistId = null
+                                        tab = entry
+                                    }
+                                },
+                                icon = {
+                                    Icon(
+                                        imageVector = entry.icon(),
+                                        contentDescription = null,
+                                    )
+                                },
+                                label = { Text(entry.label) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = MaterialTheme.colorScheme.accentText,
+                                    selectedTextColor = MaterialTheme.colorScheme.accentText,
+                                    indicatorColor = MaterialTheme.colorScheme.background,
+                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                ),
+                            )
+                        }
                     }
                 }
 
-                NowPlayingBar(onOpen = { playerOpen = true })
-
-                NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    modifier = Modifier.fillMaxWidth(),
+                AnimatedVisibility(
+                    visible = playerOpen,
+                    enter = slideInVertically(
+                        initialOffsetY = { fullHeight -> fullHeight },
+                        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+                    ) + fadeIn(
+                        animationSpec = tween(durationMillis = 250),
+                    ),
+                    exit = slideOutVertically(
+                        targetOffsetY = { fullHeight -> fullHeight },
+                        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+                    ) + fadeOut(
+                        animationSpec = tween(durationMillis = 200),
+                    ),
                 ) {
-                    MainTab.entries.forEach { entry ->
-                        NavigationBarItem(
-                            selected = tab == entry,
-                            onClick = {
-                                // Tapping Search while already on it clears the search, which is
-                                // also what brings the recent queries back into view.
-                                if (tab == entry && entry == MainTab.Search) {
-                                    SonoraBackend.clearSearch()
-                                } else {
-                                    // Leaving the Library closes whatever it had open. That state
-                                    // used to live inside it and reset this way, and holding it up
-                                    // here should not change what the user sees.
-                                    if (entry != MainTab.Library) openPlaylistId = null
-                                    tab = entry
-                                }
-                            },
-                            icon = {
-                                Icon(
-                                    imageVector = entry.icon(),
-                                    contentDescription = null,
-                                )
-                            },
-                            label = { Text(entry.label) },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.accentText,
-                                selectedTextColor = MaterialTheme.colorScheme.accentText,
-                                indicatorColor = MaterialTheme.colorScheme.background,
-                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            ),
-                        )
-                    }
-                }
+                    BackHandler { playerOpen = false }
+                    NowPlayingScreen(
+                        onClose = { playerOpen = false },
+                        isLiked = playback.track?.let { it.file.absolutePath in likedPaths } == true,
+                        onToggleLike = {
+                            playback.track?.let { SonoraBackend.toggleLiked(context, it) }
+                        },
+                        onToggleShuffle = { SonoraPlayer.toggleShuffle() },
+                        onCycleRepeat = { SonoraPlayer.cycleRepeat() },
+                        onAddToPlaylist = { addTarget = playback.track },
+                    )
                 }
             }
 
@@ -274,6 +308,12 @@ private fun MainTab.icon(): ImageVector = when (this) {
 private fun NowPlayingBar(onOpen: () -> Unit) {
     val playback by SonoraPlayer.state.collectAsState()
     val track = playback.track ?: return
+    val density = LocalDensity.current
+    val skipThresholdPx = with(density) { 50.dp.toPx() }
+    val maxDragOffsetPx = with(density) { 12.dp.toPx() }
+    var totalDrag by remember { mutableFloatStateOf(0f) }
+    val dragOffset = remember { Animatable(0f) }
+    val coroutineScope = rememberCoroutineScope()
 
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -284,6 +324,34 @@ private fun NowPlayingBar(onOpen: () -> Unit) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .graphicsLayer { translationX = dragOffset.value }
+                    .draggable(
+                        orientation = Orientation.Horizontal,
+                        state = rememberDraggableState { delta ->
+                            totalDrag += delta
+                            val target = (totalDrag * 0.12f).coerceIn(-maxDragOffsetPx, maxDragOffsetPx)
+                            coroutineScope.launch {
+                                dragOffset.snapTo(target)
+                            }
+                        },
+                        onDragStopped = { velocity ->
+                            if (totalDrag < -skipThresholdPx || velocity < -500f) {
+                                SonoraPlayer.next()
+                            } else if (totalDrag > skipThresholdPx || velocity > 500f) {
+                                SonoraPlayer.previous()
+                            }
+                            totalDrag = 0f
+                            coroutineScope.launch {
+                                dragOffset.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioLowBouncy,
+                                        stiffness = Spring.StiffnessMedium,
+                                    ),
+                                )
+                            }
+                        },
+                    )
                     .clickable(onClick = onOpen)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
