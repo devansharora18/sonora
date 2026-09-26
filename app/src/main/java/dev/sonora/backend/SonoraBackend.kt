@@ -97,6 +97,12 @@ object SonoraBackend {
     @Volatile
     private var draining = false
 
+    @Volatile
+    private var activeScratch: File? = null
+
+    @Volatile
+    private var activeTarget: File? = null
+
     private val _library = MutableStateFlow<List<LibraryTrack>>(emptyList())
 
     val library: StateFlow<List<LibraryTrack>> = _library.asStateFlow()
@@ -536,10 +542,24 @@ object SonoraBackend {
     }
 
     /**
+     * Cancels the active download and purges any partially downloaded file.
+     * If [cancelRemaining] is true, also drops remaining queued downloads.
+     */
+    fun cancelDownload(cancelRemaining: Boolean = false) {
+        if (cancelRemaining) {
+            pending.clear()
+        }
+
+        session?.cancelActiveDownload()
+
+        activeScratch?.let { if (it.exists()) it.delete() }
+        activeTarget?.let { if (it.exists()) it.delete() }
+
+        _download.value = DownloadState.Idle
+    }
+
+    /**
      * Drops everything still waiting to download.
-     *
-     * The transfer already running is left alone: aborting it mid-stream means closing its socket,
-     * and that connection belongs to the transfer layer. It finishes; nothing follows it.
      */
     fun cancelPendingDownloads() {
         pending.clear()
@@ -562,6 +582,10 @@ object SonoraBackend {
         } else {
             File(directory, name)
         }
+        val target = File(directory, name)
+
+        activeScratch = scratch
+        activeTarget = target
 
         _download.value = DownloadState.Downloading(
             filename = name,
@@ -586,8 +610,20 @@ object SonoraBackend {
             }
         }
 
-        val outcome = current.download(hit.peer, hit.filename, scratch, hit.size)
+        val outcome = try {
+            current.download(hit.peer, hit.filename, scratch, hit.size)
+        } finally {
+            activeScratch = null
+            activeTarget = null
+        }
         progress.cancel()
+
+        if (outcome is DownloadOutcome.Failed && outcome.reason == "cancelled") {
+            scratch.delete()
+            target.delete()
+            _download.value = DownloadState.Idle
+            return
+        }
 
         val published = if (outcome is DownloadOutcome.Completed && location.tree != null) {
             val moved = runCatching {
@@ -599,8 +635,6 @@ object SonoraBackend {
         } else {
             true
         }
-
-        val target = File(directory, name)
 
         _download.value = when (outcome) {
             is DownloadOutcome.Failed -> DownloadState.Failed(name, outcome.reason)

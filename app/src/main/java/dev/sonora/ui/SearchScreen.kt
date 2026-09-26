@@ -174,6 +174,7 @@ fun SearchScreen() {
 
         DownloadStatus(
             state = download,
+            onCancel = { SonoraBackend.cancelDownload() },
             onCancelRemaining = { SonoraBackend.cancelPendingDownloads() },
         )
 
@@ -607,7 +608,11 @@ private fun ResultRow(
 }
 
 @Composable
-private fun DownloadStatus(state: DownloadState, onCancelRemaining: () -> Unit) {
+private fun DownloadStatus(
+    state: DownloadState,
+    onCancel: () -> Unit,
+    onCancelRemaining: () -> Unit,
+) {
     when (state) {
         DownloadState.Idle -> Unit
 
@@ -631,7 +636,18 @@ private fun DownloadStatus(state: DownloadState, onCancelRemaining: () -> Unit) 
                 )
 
                 if (state.remaining > 0) {
-                    TextButton(onClick = onCancelRemaining) { Text("Cancel remaining") }
+                    TextButton(onClick = onCancelRemaining) { Text("Cancel all") }
+                }
+
+                IconButton(
+                    onClick = onCancel,
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Cancel download",
+                        modifier = Modifier.size(18.dp),
+                    )
                 }
             }
             LinearProgressIndicator(

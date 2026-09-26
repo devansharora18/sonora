@@ -123,6 +123,8 @@ class SoulseekSession(
     private val outboundPeers = ConcurrentHashMap.newKeySet<Socket>()
     private val pendingAddresses = ConcurrentHashMap<String, BlockingQueue<UserAddress>>()
     private val pendingTransfers = ConcurrentHashMap<Long, PendingTransfer>()
+    @Volatile
+    private var activeTransfer: PendingTransfer? = null
 
     /** Uploads a peer has asked for and we have offered, awaiting its answer. */
     private val negotiatingUploads = ConcurrentHashMap<String, NegotiatingUpload>()
@@ -553,6 +555,11 @@ class SoulseekSession(
      * [size] should come from the original search result rather than the peer's offer, because
      * SoulseekQt reports 0 for files over 2 GB.
      */
+    /** Cancels the currently active download in flight, closing its connection and aborting transfer. */
+    fun cancelActiveDownload() {
+        activeTransfer?.cancel()
+    }
+
     fun download(
         username: String,
         filename: String,
@@ -560,21 +567,30 @@ class SoulseekSession(
         size: Long,
     ): DownloadOutcome {
         val transfer = PendingTransfer(destination, size)
+        activeTransfer = transfer
         var token: Long? = null
 
-        val negotiation = negotiateDownload(username, filename, expectedSize = size) { peer, accepted ->
+        val negotiation = negotiateDownload(username, filename, expectedSize = size, transfer = transfer) { peer, accepted ->
             token = accepted
             pendingTransfers[accepted] = transfer
             watchNegotiationConnection(peer, transfer)
         }
 
         if (negotiation !is DownloadRequest.Accepted) {
-            return DownloadOutcome.Failed("the download request was not accepted")
+            return if (transfer.isCancelled) {
+                DownloadOutcome.Failed("cancelled")
+            } else {
+                DownloadOutcome.Failed("the download request was not accepted")
+            }
         }
 
         return try {
             if (!transfer.completion.await(transferTimeoutMillis, TimeUnit.MILLISECONDS)) {
-                DownloadOutcome.Failed("the peer never opened a file connection")
+                if (transfer.isCancelled) {
+                    DownloadOutcome.Failed("cancelled")
+                } else {
+                    DownloadOutcome.Failed("the peer never opened a file connection")
+                }
             } else {
                 transfer.outcome ?: DownloadOutcome.Failed("the transfer ended without a result")
             }
@@ -582,6 +598,9 @@ class SoulseekSession(
             DownloadOutcome.Failed("interrupted")
         } finally {
             token?.let { pendingTransfers.remove(it) }
+            if (activeTransfer === transfer) {
+                activeTransfer = null
+            }
         }
     }
 
@@ -589,9 +608,15 @@ class SoulseekSession(
         username: String,
         filename: String,
         expectedSize: Long?,
+        transfer: PendingTransfer? = null,
         onAccepted: (peer: PeerSession, token: Long) -> Unit,
     ): DownloadRequest {
         val peer = connectToUser(username) ?: return DownloadRequest.Unreachable
+        transfer?.negotiationPeer = peer
+        if (transfer?.isCancelled == true) {
+            runCatching { peer.close() }
+            return DownloadRequest.Unreachable
+        }
 
         return try {
             peer.send(QueueUpload.CODE, QueueUpload.request(filename))
@@ -749,6 +774,12 @@ class SoulseekSession(
                 return
             }
 
+            pending.fileSession = session
+            if (pending.isCancelled) {
+                runCatching { session.close() }
+                return
+            }
+
             onTrace("receiving ${transfer.size} bytes from ${session.username}")
             FileTransfer.requestFrom(session.outputStream(), offset = 0)
 
@@ -757,7 +788,9 @@ class SoulseekSession(
                 FileTransfer.copyBytes(session.inputStream(), destination, transfer.size)
             }
 
-            transfer.outcome = if (written == transfer.size) {
+            transfer.outcome = if (transfer.isCancelled) {
+                DownloadOutcome.Failed("cancelled")
+            } else if (written == transfer.size) {
                 DownloadOutcome.Completed(written)
             } else {
                 // Resumable: the caller keeps the partial file and can retry from `written`.
@@ -771,7 +804,11 @@ class SoulseekSession(
                 .orEmpty()
 
             onTrace("file connection failed from ${session.username}: ${e.javaClass.simpleName}: ${e.message}$frame")
-            transfer?.outcome = DownloadOutcome.Failed("${e.javaClass.simpleName}: ${e.message}")
+            if (transfer?.isCancelled == true) {
+                transfer?.outcome = DownloadOutcome.Failed("cancelled")
+            } else {
+                transfer?.outcome = DownloadOutcome.Failed("${e.javaClass.simpleName}: ${e.message}")
+            }
         } finally {
             session.close()
             transfer?.completion?.countDown()
@@ -1100,10 +1137,27 @@ private class PendingTransfer(val destination: File, val size: Long) {
     @Volatile
     var outcome: DownloadOutcome? = null
 
+    @Volatile
+    var negotiationPeer: PeerSession? = null
+
+    @Volatile
+    var fileSession: PeerSession? = null
+
+    @Volatile
+    var isCancelled: Boolean = false
+
     /** Only one connection may drive a transfer — a peer may open one while our own dial is in flight. */
     fun claim(): Boolean = claimed.compareAndSet(false, true)
 
     val isClaimed: Boolean get() = claimed.get()
+
+    fun cancel() {
+        isCancelled = true
+        outcome = DownloadOutcome.Failed("cancelled")
+        runCatching { fileSession?.close() }
+        runCatching { negotiationPeer?.close() }
+        completion.countDown()
+    }
 }
 
 /** The outcome of a download. */
