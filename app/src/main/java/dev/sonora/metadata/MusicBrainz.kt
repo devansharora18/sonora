@@ -27,7 +27,7 @@ object MusicBrainz {
      * Their guidance asks for a contact URL as well; the package name stands in until there is a
      * public repository to point at.
      */
-    const val USER_AGENT = "Sonora/0.1.0 (dev.sonora; Android)"
+    const val USER_AGENT = "Sonora/0.2.0 (dev.sonora; Android)"
 
     fun artistSearchUrl(name: String): String =
         "$BASE/artist?query=${encode(name)}&fmt=json&limit=1"

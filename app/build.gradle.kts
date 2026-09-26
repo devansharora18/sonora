@@ -28,8 +28,8 @@ android {
         // Provisional. See docs/toolchain.md - this value drives the Android 15
         // foreground-service time cap described in the PRD (D3).
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     compileOptions {
