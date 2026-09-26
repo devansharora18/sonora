@@ -22,10 +22,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -113,6 +115,7 @@ fun HomeScreen(onRunSearch: (String) -> Unit, onOpenPlaylist: (String) -> Unit) 
                     filename = active.filename,
                     fraction = active.fraction,
                     remaining = active.remaining,
+                    onCancel = { SonoraBackend.cancelDownload() },
                 )
             }
         }
@@ -265,22 +268,45 @@ private fun RecentSearchesRow(history: List<String>, onRunSearch: (String) -> Un
 
 
 @Composable
-private fun DownloadingCard(filename: String, fraction: Float?, remaining: Int) {
+private fun DownloadingCard(
+    filename: String,
+    fraction: Float?,
+    remaining: Int,
+    onCancel: () -> Unit,
+) {
     Column(modifier = Modifier.padding(horizontal = 20.dp)) {
-        Text(
-            text = "Downloading",
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Text(
-            text = buildString {
-                append(filename)
-                if (remaining > 0) append("  \u00b7  $remaining queued")
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Downloading",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = buildString {
+                        append(filename)
+                        if (remaining > 0) append("  \u00b7  $remaining queued")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(
+                onClick = onCancel,
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "Cancel download",
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
 
         Box(
             modifier = Modifier
