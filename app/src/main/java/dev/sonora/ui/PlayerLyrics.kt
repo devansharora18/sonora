@@ -161,19 +161,44 @@ private val PREV_LYRIC_SPACER_HEIGHT = 60.dp
 
 /**
  * Returns the LazyColumn item index to scroll to so that [focusLine] appears as the
- * second line displayed, with the previous line displayed in the first slot.
+ * second line displayed in normal mode, or the third line in fullscreen mode.
  */
-internal fun previousVisibleItemIndex(lines: List<LyricLine>, focusLine: Int): Int {
+internal fun targetLyricItemIndex(lines: List<LyricLine>, focusLine: Int, isFullscreen: Boolean = false): Int {
     if (focusLine <= 0 || focusLine !in lines.indices) return 0
-    var prev = focusLine - 1
-    while (prev > 0 && lines[prev].isGap) {
-        prev--
-    }
-    if (lines[prev].isGap) {
+    if (!isFullscreen) {
+        var prev = focusLine - 1
+        while (prev > 0 && lines[prev].isGap) {
+            prev--
+        }
+        if (lines[prev].isGap) {
+            return 0
+        }
+        return prev + 1
+    } else {
+        // In fullscreen mode, active lyric should be on the third line,
+        // so we want 2 preceding non-gap lines visible above it.
+        var count = 0
+        var target = focusLine - 1
+        var prev2 = -1
+        while (target >= 0) {
+            if (!lines[target].isGap) {
+                count++
+                if (count == 2) {
+                    prev2 = target
+                    break
+                }
+            }
+            target--
+        }
+        if (prev2 >= 0) {
+            return prev2 + 1
+        }
         return 0
     }
-    return prev + 1
 }
+
+internal fun previousVisibleItemIndex(lines: List<LyricLine>, focusLine: Int): Int =
+    targetLyricItemIndex(lines, focusLine, isFullscreen = false)
 
 /**
  * The lyrics pane displaying synced lines following the current playhead.
@@ -191,6 +216,7 @@ internal fun LyricsPane(
     positionMs: Long,
     isPlaying: Boolean,
     onSeek: (Long) -> Unit,
+    isFullscreen: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -261,10 +287,10 @@ internal fun LyricsPane(
 
     var placed by remember(lyrics) { mutableStateOf(false) }
 
-    LaunchedEffect(focusLine, browsing) {
+    LaunchedEffect(focusLine, browsing, isFullscreen) {
         if (!browsing && focusLine >= 0 && focusLine in lyrics.lines.indices) {
             val targetIndex = if (isSynced) {
-                previousVisibleItemIndex(lyrics.lines, focusLine)
+                targetLyricItemIndex(lyrics.lines, focusLine, isFullscreen)
             } else {
                 focusLine
             }
@@ -337,7 +363,25 @@ internal fun LyricsPane(
                 ) {
                     if (isSynced) {
                         item(key = "top_spacer") {
-                            Spacer(Modifier.height(PREV_LYRIC_SPACER_HEIGHT))
+                            val nonGapBefore = remember(lyrics.lines, focusLine) {
+                                var c = 0
+                                for (i in 0 until focusLine) {
+                                    if (i in lyrics.lines.indices && !lyrics.lines[i].isGap) c++
+                                }
+                                c
+                            }
+                            val targetSpacer = when {
+                                !isFullscreen -> PREV_LYRIC_SPACER_HEIGHT
+                                nonGapBefore == 0 -> 128.dp
+                                nonGapBefore == 1 -> 64.dp
+                                else -> PREV_LYRIC_SPACER_HEIGHT
+                            }
+                            val topSpacerHeight by animateDpAsState(
+                                targetValue = targetSpacer,
+                                animationSpec = tween(LYRIC_SETTLE_MS, easing = LYRIC_EASING),
+                                label = "topSpacerHeight",
+                            )
+                            Spacer(Modifier.height(topSpacerHeight))
                         }
                     }
                     itemsIndexed(lyrics.lines, key = { index, line -> "$index:${line.timeMs}" }) { index, line ->

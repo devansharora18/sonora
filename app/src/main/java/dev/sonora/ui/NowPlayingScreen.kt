@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Repeat
@@ -45,8 +47,10 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
@@ -54,9 +58,11 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import dev.sonora.lyrics.LyricsStore
 import androidx.compose.runtime.collectAsState
@@ -114,8 +120,13 @@ fun NowPlayingScreen(
     // The words, over the sleeve. Held here rather than in the app so the pane and the artwork are
     // two states of one thing and cannot disagree about which is showing.
     var lyricsOpen by remember { mutableStateOf(false) }
+    var lyricsFullscreen by remember { mutableStateOf(false) }
     val lyrics by LyricsStore.current.collectAsState()
     val track = playback.track ?: return
+
+    LaunchedEffect(lyricsOpen) {
+        if (!lyricsOpen) lyricsFullscreen = false
+    }
 
     // Asked for as the pane opens, not when the track starts: a request made for a track nobody is
     // going to read the words of is a request for nothing.
@@ -448,6 +459,7 @@ fun NowPlayingScreen(
                 .fillMaxSize()
                 .graphicsLayer { alpha = playerControlsAlpha }
                 .statusBarsPadding()
+                .navigationBarsPadding()
                 .padding(start = 24.dp, top = 4.dp, end = 24.dp, bottom = 24.dp)
                 .draggable(
                     orientation = Orientation.Vertical,
@@ -461,14 +473,6 @@ fun NowPlayingScreen(
             Box(
                 modifier = Modifier
                     .padding(top = 2.dp, bottom = 12.dp)
-                    .size(width = 36.dp, height = 4.5.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.32f)),
-            )
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
                     .draggable(
                         orientation = Orientation.Vertical,
                         enabled = lyricsOpen,
@@ -477,15 +481,57 @@ fun NowPlayingScreen(
                     ),
                 contentAlignment = Alignment.Center,
             ) {
-                SubIconButton(
-                    icon = Icons.Rounded.KeyboardArrowDown,
-                    contentDescription = "Collapse player",
-                    onClick = onClose,
-                    size = 40.dp,
-                    glyphSize = 24.dp,
-                    idleTint = Color.White.copy(alpha = 0.8f),
-                    modifier = Modifier.align(Alignment.CenterStart),
+                Box(
+                    modifier = Modifier
+                        .size(width = 36.dp, height = 4.5.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.32f)),
                 )
+            }
+
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    modifier = Modifier.align(Alignment.CenterStart),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    SubIconButton(
+                        icon = Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = "Collapse player",
+                        onClick = onClose,
+                        size = 40.dp,
+                        glyphSize = 24.dp,
+                        idleTint = Color.White.copy(alpha = 0.8f),
+                    )
+
+                    AnimatedVisibility(
+                        visible = lyricsOpen,
+                        enter = fadeIn(tween(180)),
+                        exit = fadeOut(tween(140)),
+                    ) {
+                        SubIconButton(
+                            icon = if (lyricsFullscreen) {
+                                Icons.Rounded.FullscreenExit
+                            } else {
+                                Icons.Rounded.Fullscreen
+                            },
+                            contentDescription = if (lyricsFullscreen) {
+                                "Exit fullscreen lyrics"
+                            } else {
+                                "Fullscreen lyrics"
+                            },
+                            onClick = { lyricsFullscreen = !lyricsFullscreen },
+                            size = 40.dp,
+                            glyphSize = 24.dp,
+                            active = lyricsFullscreen,
+                            activeTint = Color.White,
+                            idleTint = Color.White.copy(alpha = 0.55f),
+                        )
+                    }
+                }
 
                 Text(
                     text = "NOW PLAYING",
@@ -524,7 +570,7 @@ fun NowPlayingScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            verticalArrangement = Arrangement.Center,
+            verticalArrangement = if (lyricsOpen) Arrangement.Top else Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // The sleeve and the words, one over the other. Crossfaded rather than swapped, so
@@ -554,7 +600,13 @@ fun NowPlayingScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(1f),
+                    .then(
+                        if (!lyricsOpen) {
+                            Modifier.aspectRatio(1f)
+                        } else {
+                            Modifier.fillMaxSize()
+                        }
+                    ),
             ) {
                 // A track that could not be fetched says so, in the place the picture would be, and
                 // offers the two things a listener can actually do about it. A spinner that never stops
@@ -638,15 +690,23 @@ fun NowPlayingScreen(
                         positionMs = playback.positionMs,
                         isPlaying = playback.isPlaying,
                         onSeek = { SonoraPlayer.seekTo(it) },
+                        isFullscreen = lyricsFullscreen,
                         modifier = Modifier.graphicsLayer { alpha = wordsAlpha },
                     )
                 }
             }
+        }
+
+            val titleTopPadding by animateDpAsState(
+                targetValue = if (lyricsFullscreen) 12.dp else 22.dp,
+                animationSpec = tween(280),
+                label = "titleTopPadding",
+            )
 
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 22.dp),
+                    .padding(top = titleTopPadding),
             ) {
                 val textShadow = remember {
                     Shadow(
@@ -712,87 +772,121 @@ fun NowPlayingScreen(
                         )
                     }
                 }
+            }
 
-                val quality = remember(track.key, duration) { AudioQuality.from(track, duration) }
-                if (quality.isNotBlank()) {
-                    val badgeShape = RoundedCornerShape(percent = 50)
-                    Box(
+            AnimatedVisibility(
+                visible = !lyricsFullscreen,
+                enter = expandVertically(
+                    animationSpec = tween(
+                        durationMillis = 280,
+                        easing = CubicBezierEasing(0.2f, 0f, 0f, 1f),
+                    ),
+                    expandFrom = Alignment.Top,
+                ) + slideInVertically(
+                    initialOffsetY = { it / 2 },
+                    animationSpec = tween(
+                        durationMillis = 280,
+                        easing = CubicBezierEasing(0.2f, 0f, 0f, 1f),
+                    ),
+                ) + fadeIn(animationSpec = tween(durationMillis = 200)),
+                exit = shrinkVertically(
+                    animationSpec = tween(
+                        durationMillis = 260,
+                        easing = CubicBezierEasing(0.2f, 0f, 0f, 1f),
+                    ),
+                    shrinkTowards = Alignment.Top,
+                ) + slideOutVertically(
+                    targetOffsetY = { it / 2 },
+                    animationSpec = tween(
+                        durationMillis = 260,
+                        easing = CubicBezierEasing(0.2f, 0f, 0f, 1f),
+                    ),
+                ) + fadeOut(animationSpec = tween(durationMillis = 180)),
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    val quality = remember(track.key, duration) { AudioQuality.from(track, duration) }
+                    if (quality.isNotBlank()) {
+                        val badgeShape = RoundedCornerShape(percent = 50)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(badgeShape)
+                                    .background(Color.White.copy(alpha = 0.12f))
+                                    .border(0.5.dp, Color.White.copy(alpha = 0.15f), badgeShape)
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                            ) {
+                                Text(
+                                    text = if (quality == "YT Music") "YT Music" else quality.uppercase(),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.SemiBold,
+                                        letterSpacing = 0.6.sp,
+                                    ),
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+
+                    Column(
                         modifier = Modifier
-                            .padding(top = 8.dp)
-                            .clip(badgeShape)
-                            .background(Color.White.copy(alpha = 0.12f))
-                            .border(0.5.dp, Color.White.copy(alpha = 0.15f), badgeShape)
-                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                            .fillMaxWidth()
+                            .padding(top = 16.dp),
                     ) {
-                        Text(
-                            text = if (quality == "YT Music") "YT Music" else quality.uppercase(),
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                letterSpacing = 0.6.sp,
-                            ),
-                            color = Color.White.copy(alpha = 0.85f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                        PlayerScrubber(
+                            positionMs = (played.toDouble() * duration).toLong(),
+                            durationMs = duration,
+                            onSeek = { SonoraPlayer.seekTo(it) },
                         )
                     }
+
+                    TransportRow(
+                        isPlaying = playback.isPlaying,
+                        onPrevious = { animatePrevious() },
+                        onPlayPause = { SonoraPlayer.togglePlayPause() },
+                        onNext = { animateNext() },
+                        modifier = Modifier.padding(top = 16.dp),
+                    )
+
+                    Spacer(Modifier.height(16.dp))
+
+                    val (volume, onVolumeChange) = rememberDeviceVolume()
+                    VolumeRow(
+                        volume = volume,
+                        onVolumeChange = onVolumeChange,
+                        modifier = Modifier.padding(horizontal = 24.dp),
+                    )
+
+                    Spacer(Modifier.height(16.dp))
+
+                    PlayerActionRow(
+                        lyricsOpen = lyricsOpen,
+                        onToggleLyrics = {
+                            lyricsOpen = !lyricsOpen
+                            if (lyricsOpen) queueOpen = false
+                        },
+                        isShuffled = playback.isShuffled,
+                        onToggleShuffle = onToggleShuffle,
+                        repeatMode = playback.repeatMode,
+                        onCycleRepeat = onCycleRepeat,
+                        queueOpen = queueOpen,
+                        onToggleQueue = { queueOpen = !queueOpen },
+                        modifier = Modifier.padding(horizontal = 24.dp),
+                    )
                 }
             }
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 16.dp),
-            ) {
-                // A bar with no knob that thickens under the finger, rather than a Material
-                // slider. The knob is a thing to aim at on a full-width control, and on a phone
-                // the finger is already sitting exactly where it is; what is needed instead is a
-                // line that is easy to see and hard to miss, which is what growing it while
-                // dragging is for.
-                PlayerScrubber(
-                    positionMs = (played.toDouble() * duration).toLong(),
-                    durationMs = duration,
-                    // A track with no known duration cannot be seeked into.
-                    onSeek = { SonoraPlayer.seekTo(it) },
-                )
-            }
-
-            TransportRow(
-                isPlaying = playback.isPlaying,
-                onPrevious = { animatePrevious() },
-                onPlayPause = { SonoraPlayer.togglePlayPause() },
-                onNext = { animateNext() },
-                modifier = Modifier.padding(top = 16.dp),
-            )
-
-            Spacer(Modifier.height(16.dp))
-
-            // Volume, in the same thin shape as the scrubber and directly under it, so the two read
-            // as one control rather than as a pair.
-            val (volume, onVolumeChange) = rememberDeviceVolume()
-            VolumeRow(
-                volume = volume,
-                onVolumeChange = onVolumeChange,
-                modifier = Modifier.padding(horizontal = 24.dp),
-            )
-
-            Spacer(Modifier.height(16.dp))
-
-            PlayerActionRow(
-                lyricsOpen = lyricsOpen,
-                onToggleLyrics = {
-                    // The two panes are one screen, so opening one closes the other.
-                    lyricsOpen = !lyricsOpen
-                    if (lyricsOpen) queueOpen = false
-                },
-                isShuffled = playback.isShuffled,
-                onToggleShuffle = onToggleShuffle,
-                repeatMode = playback.repeatMode,
-                onCycleRepeat = onCycleRepeat,
-                queueOpen = queueOpen,
-                onToggleQueue = { queueOpen = !queueOpen },
-                modifier = Modifier.padding(horizontal = 24.dp),
-            )
         }
+
+    BackHandler(enabled = lyricsFullscreen) {
+        lyricsFullscreen = false
     }
 
     AnimatedVisibility(
