@@ -3,12 +3,12 @@ package dev.sonora.backend.radio
 import dev.sonora.backend.JsonFile
 import java.io.File
 
-/** The picked radio artists, stored as one JSON document. See [JsonFile]. */
+/** The radio draft and the saved radios, stored as one JSON document. See [JsonFile]. */
 class RadioStore(file: File) {
 
-    private val json = JsonFile(file, RadioSetup.serializer())
+    private val json = JsonFile(file, RadioState.serializer())
 
-    fun load(): RadioSetup = json.read() ?: RadioSetup()
+    fun load(): RadioState = json.read() ?: RadioState()
 
-    fun save(setup: RadioSetup) = json.write(setup)
+    fun save(state: RadioState) = json.write(state)
 }

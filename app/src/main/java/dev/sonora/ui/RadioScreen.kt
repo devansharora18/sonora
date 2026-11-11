@@ -26,12 +26,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -45,12 +47,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sonora.backend.SonoraBackend
-import dev.sonora.backend.radio.RadioMode
 import dev.sonora.backend.radio.RadioSeed
 import dev.sonora.backend.radio.RadioSetup
+import dev.sonora.backend.radio.SavedRadio
 import dev.sonora.ui.theme.accentText
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -60,39 +63,49 @@ import kotlinx.coroutines.launch
 private val SEED_ART = 40.dp
 
 /**
- * Pick artists, then choose how far to reach.
+ * Pick artists, set how far the mix roams, play it — and keep it.
  *
- * One screen rather than three entry points, because the three mixes are answers to the same
- * question and the question is "who". The mixes are therefore not tabs or modes stored away in a
- * menu: they sit under the same selection, and switching between them costs one tap.
+ * One control carries the whole character of a mix. Variety is a position, not a choice between
+ * three named things: at the left the radio is only the artists that were picked, and it moves
+ * outward from there. The slider's own caption says where it currently is, so the number on it is
+ * never the only explanation.
  */
 @Composable
 fun RadioScreen(
     onBack: () -> Unit,
-    onPlay: (RadioMode, List<dev.sonora.backend.LibraryTrack>) -> Unit,
+    onPlay: (List<dev.sonora.backend.LibraryTrack>) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val setup by SonoraBackend.radio.collectAsState()
+    val state by SonoraBackend.radio.collectAsState()
+    val draft = state.draft
 
     var picking by remember { mutableStateOf(false) }
-    var building by remember { mutableStateOf<RadioMode?>(null) }
+    var building by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf(false) }
+    var savedNotice by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { SonoraBackend.refreshRadio(context) }
 
-    fun start(mode: RadioMode) {
-        if (building != null || !setup.isReady) return
+    fun play(savedId: String? = null) {
+        if (building || !draft.isReady) return
 
         failure = false
-        building = mode
+        building = true
         scope.launch {
-            val tracks = runCatching { SonoraBackend.startRadio(context, mode) }.getOrDefault(emptyList())
-            building = null
+            val tracks = runCatching {
+                if (savedId != null) {
+                    SonoraBackend.startSavedRadio(context, savedId)
+                } else {
+                    SonoraBackend.startRadio(context)
+                }
+            }.getOrDefault(emptyList())
+
+            building = false
             if (tracks.isEmpty()) {
                 failure = true
             } else {
-                onPlay(mode, tracks)
+                onPlay(tracks)
             }
         }
     }
@@ -114,24 +127,15 @@ fun RadioScreen(
             modifier = Modifier.padding(horizontal = PAGE_GUTTER, vertical = 8.dp),
         )
 
-        Text(
-            text = "Pick a few artists, then choose how far out the mix should reach.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = PAGE_GUTTER, vertical = 4.dp),
-        )
-
-        Spacer(Modifier.height(12.dp))
-
         SettingsGroup(
             header = "Artists",
-            footer = if (setup.seeds.isEmpty()) {
-                "Up to ${RadioSetup.MAX_SEEDS}. Everything below is built from them."
+            footer = if (draft.seeds.isEmpty()) {
+                "Up to ${RadioSetup.MAX_SEEDS}. The mix is built from them."
             } else {
                 null
             },
         ) {
-            setup.seeds.forEachIndexed { index, seed ->
+            draft.seeds.forEachIndexed { index, seed ->
                 if (index > 0) RowDivider()
                 SeedRow(
                     seed = seed,
@@ -139,30 +143,80 @@ fun RadioScreen(
                 )
             }
 
-            if (setup.seeds.isNotEmpty()) RowDivider()
+            if (draft.seeds.isEmpty()) {
+                EmptyHint()
+            } else {
+                RowDivider()
+            }
 
             SettingsActions {
                 OutlinedButton(
                     onClick = { picking = true },
-                    enabled = setup.seeds.size < RadioSetup.MAX_SEEDS,
+                    enabled = draft.seeds.size < RadioSetup.MAX_SEEDS,
                 ) {
-                    Text(if (setup.seeds.isEmpty()) "Add an artist" else "Add another")
+                    Text(if (draft.seeds.isEmpty()) "Add an artist" else "Add another")
                 }
             }
         }
 
         Spacer(Modifier.height(16.dp))
 
-        SettingsGroup(header = "Play a mix") {
-            RadioMode.entries.forEachIndexed { index, mode ->
-                if (index > 0) RowDivider()
-                MixRow(
-                    mode = mode,
-                    enabled = setup.isReady && building == null,
-                    building = building == mode,
-                    onPlay = { start(mode) },
-                )
+        VarietyPanel(
+            setup = draft,
+            enabled = draft.isReady,
+            onChange = { SonoraBackend.setRadioVariety(context, it) },
+            onFamiliarChange = { SonoraBackend.setRadioFamiliar(context, it) },
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = PAGE_GUTTER),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Button(
+                onClick = { play() },
+                enabled = draft.isReady && !building,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(50.dp),
+                shape = RoundedCornerShape(13.dp),
+            ) {
+                if (building) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    Icon(Icons.Rounded.PlayArrow, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Play mix")
+                }
             }
+
+            OutlinedButton(
+                onClick = {
+                    SonoraBackend.saveRadio(context)
+                    savedNotice = true
+                },
+                enabled = draft.isReady,
+                modifier = Modifier.height(50.dp),
+                shape = RoundedCornerShape(13.dp),
+            ) {
+                Text("Save")
+            }
+        }
+
+        if (savedNotice) {
+            Text(
+                text = "Saved. It is on Home and in the Library now.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = PAGE_GUTTER + 4.dp, vertical = 10.dp),
+            )
         }
 
         if (failure) {
@@ -170,27 +224,198 @@ fun RadioScreen(
                 text = "Could not build that mix. Check your connection and try again.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(horizontal = PAGE_GUTTER + 6.dp, vertical = 12.dp),
+                modifier = Modifier.padding(horizontal = PAGE_GUTTER + 4.dp, vertical = 10.dp),
             )
         }
 
-        if (!setup.isReady) {
-            Text(
-                text = "An artist can be added from your listening history or by searching for one.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = PAGE_GUTTER + 6.dp, vertical = 12.dp),
-            )
+        if (state.saved.isNotEmpty()) {
+            Spacer(Modifier.height(18.dp))
+
+            SettingsGroup(
+                header = "Saved radios",
+                footer = "Tap one to tune it. Its artists and variety come back into this page.",
+            ) {
+                state.saved.forEachIndexed { index, radio ->
+                    if (index > 0) RowDivider()
+                    SavedRadioRow(
+                        radio = radio,
+                        onOpen = {
+                            SonoraBackend.editRadio(context, radio.id)
+                            savedNotice = false
+                        },
+                        onPlay = { play(savedId = radio.id) },
+                        onDelete = { SonoraBackend.deleteRadio(context, radio.id) },
+                    )
+                }
+            }
         }
     }
 
     if (picking) {
         ArtistPickerSheet(
-            selected = setup.seeds,
+            selected = draft.seeds,
             onAdd = { seed -> SonoraBackend.addRadioSeed(context, seed) },
             onDismiss = { picking = false },
         )
     }
+}
+
+/**
+ * The variety slider, its end labels, and the sentence that says where the mix currently sits.
+ *
+ * The caption is the important half. A slider whose meaning lives only in its position is a control
+ * you have to move before you can understand it; one that says "mostly your artists, with a few
+ * neighbours" is readable at rest.
+ */
+@Composable
+private fun VarietyPanel(
+    setup: RadioSetup,
+    enabled: Boolean,
+    onChange: (Float) -> Unit,
+    onFamiliarChange: (Boolean) -> Unit,
+) {
+    SettingsGroup(header = "Variety") {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+            Slider(
+                value = setup.variety,
+                onValueChange = onChange,
+                enabled = enabled,
+                valueRange = 0f..1f,
+                // Four steps, so the slider has five positions and a thumb that lands on one
+                // rather than on a float nobody can name.
+                steps = 3,
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.accentText,
+                    activeTrackColor = MaterialTheme.colorScheme.accentText,
+                    // Outline, not surfaceVariant: the track sits on a surfaceVariant card, so the
+                    // same colour makes the right half of the range invisible.
+                    inactiveTrackColor = MaterialTheme.colorScheme.outline,
+                ),
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = "Only these artists",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "Something new",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            Text(
+                text = varietyCaption(setup),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+        }
+
+        RowDivider()
+
+        SettingsRow(
+            title = "Familiar only",
+            subtitle = "Leave out anything you have not played, liked or downloaded.",
+            trailing = { SettingSwitch(setup.familiarOnly, onFamiliarChange) },
+            onClick = { onFamiliarChange(!setup.familiarOnly) },
+        )
+    }
+}
+
+/** What the slider currently means, in the listener's own artists. */
+private fun varietyCaption(setup: RadioSetup): String {
+    val names = when (setup.seeds.size) {
+        0 -> "your artists"
+        1 -> setup.seeds.first().name
+        2 -> setup.seeds.joinToString(" and ") { it.name }
+        else -> "${setup.seeds.take(2).joinToString(", ") { it.name }} and more"
+    }
+
+    return when {
+        setup.variety <= 0.01f -> "Only $names. Nothing from outside them."
+        setup.variety < 0.4f -> "Mostly $names, with a few artists around them."
+        setup.variety < 0.7f -> "A mix of $names and new artists."
+        else -> "Mostly new artists, chosen from around $names."
+    }
+}
+
+/** One saved radio: what it is, and the two things you can do with it. */
+@Composable
+internal fun SavedRadioRow(
+    radio: SavedRadio,
+    onOpen: () -> Unit,
+    onPlay: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen)
+            .heightIn(min = 60.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = radio.name,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = radioSummary(radio),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        CircleGlyph(
+            icon = Icons.Filled.Close,
+            contentDescription = "Delete ${radio.name}",
+            onClick = onDelete,
+            size = 44.dp,
+            glyphSize = 18.dp,
+            disc = false,
+        )
+
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.accentText)
+                .clickable(onClick = onPlay),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.PlayArrow,
+                contentDescription = "Play ${radio.name}",
+                tint = MaterialTheme.colorScheme.background,
+                modifier = Modifier.size(26.dp),
+            )
+        }
+    }
+}
+
+/** "3 artists · a mix of theirs and new" — enough to tell two saved radios apart. */
+internal fun radioSummary(radio: SavedRadio): String {
+    val artists = if (radio.seeds.size == 1) "1 artist" else "${radio.seeds.size} artists"
+    val reach = when {
+        radio.variety <= 0.01f -> "only them"
+        radio.variety < 0.4f -> "mostly them"
+        radio.variety < 0.7f -> "mixed"
+        else -> "mostly new"
+    }
+    return if (radio.familiarOnly) "$artists · familiar only" else "$artists · $reach"
 }
 
 /** One picked artist: a disc, a name, and the way to take it back off. */
@@ -228,71 +453,14 @@ private fun SeedRow(seed: RadioSeed, onRemove: () -> Unit) {
     }
 }
 
-/** One mix: what it does, and the button that starts it. */
 @Composable
-private fun MixRow(
-    mode: RadioMode,
-    enabled: Boolean,
-    building: Boolean,
-    onPlay: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(if (enabled) Modifier.clickable(onClick = onPlay) else Modifier)
-            .heightIn(min = 64.dp)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = mode.label,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
-            Text(
-                text = mode.blurb,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-            )
-        }
-
-        Spacer(Modifier.width(12.dp))
-
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .background(
-                    if (enabled) {
-                        MaterialTheme.colorScheme.accentText
-                    } else {
-                        MaterialTheme.colorScheme.surfaceVariant
-                    },
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (building) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onBackground,
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Rounded.PlayArrow,
-                    contentDescription = "Play ${mode.label}",
-                    tint = if (enabled) {
-                        MaterialTheme.colorScheme.background
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    modifier = Modifier.size(26.dp),
-                )
-            }
-        }
-    }
+private fun EmptyHint() {
+    Text(
+        text = "No artists yet. Add one from your listening history or by searching.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+    )
 }
 
 /**
@@ -314,10 +482,14 @@ private fun ArtistPickerSheet(
     var suggestions by remember { mutableStateOf<List<RadioSeed>>(emptyList()) }
     var results by remember { mutableStateOf<List<RadioSeed>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
+    var loadingSuggestions by remember { mutableStateOf(true) }
     var searchJob by remember { mutableStateOf<Job?>(null) }
 
     LaunchedEffect(Unit) {
+        // One catalogue lookup per artist, so this is not instant on a cold start. Saying so is
+        // what stops the sheet claiming the listener has no history.
         suggestions = runCatching { SonoraBackend.radioSuggestions(context) }.getOrDefault(emptyList())
+        loadingSuggestions = false
     }
 
     LaunchedEffect(query) {
@@ -364,6 +536,8 @@ private fun ArtistPickerSheet(
 
             when {
                 searching -> LoadingRow("Searching…")
+
+                loadingSuggestions && query.isBlank() -> LoadingRow("Loading your artists…")
 
                 shown.isEmpty() && query.isBlank() ->
                     LoadingRow("Listen to something first, or search for an artist.")
@@ -442,7 +616,7 @@ private fun PickerRow(
 
 /** The artist's picture, or a person glyph when there is none. */
 @Composable
-private fun ArtistDisc(artwork: androidx.compose.ui.graphics.ImageBitmap?, name: String) {
+internal fun ArtistDisc(artwork: androidx.compose.ui.graphics.ImageBitmap?, name: String) {
     Box(
         modifier = Modifier
             .size(SEED_ART)
@@ -473,7 +647,10 @@ private fun LoadingRow(message: String) {
         text = message,
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
+        textAlign = TextAlign.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 20.dp),
     )
 }
 

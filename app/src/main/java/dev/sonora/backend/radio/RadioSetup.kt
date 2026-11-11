@@ -22,16 +22,19 @@ data class RadioSeed(
 }
 
 /**
- * The picked artists and the mix last chosen, as one document.
+ * The picked artists and how far the mix should roam, as one document.
  *
- * Kept as a selection rather than as a station: the listener reopens the screen with their artists
- * still picked, and the three mixes stay one tap away. The mixes themselves are not stored — they
- * are rebuilt from this, which is what stops a stale queue outliving the taste it came from.
+ * [variety] is the whole control, expressed as one number: at 0 the mix is only the artists that
+ * were picked, and at 1 it is almost entirely artists around them. Everything between is a
+ * proportion, not a mode — which is what makes it a slider instead of three buttons that each
+ * pretend to be the same kind of thing.
  */
 @Serializable
 data class RadioSetup(
     val seeds: List<RadioSeed> = emptyList(),
-    val mode: RadioMode = RadioMode.BLENDED,
+    val variety: Float = DEFAULT_VARIETY,
+    /** Only music already played, liked or downloaded, whatever the variety. */
+    val familiarOnly: Boolean = false,
 ) {
 
     val isReady: Boolean get() = seeds.isNotEmpty()
@@ -63,5 +66,8 @@ data class RadioSetup(
     companion object {
         /** The most artists one mix can be built from. */
         const val MAX_SEEDS = 5
+
+        /** Where the slider starts: mostly the picks, with a few neighbours. */
+        const val DEFAULT_VARIETY = 0.3f
     }
 }

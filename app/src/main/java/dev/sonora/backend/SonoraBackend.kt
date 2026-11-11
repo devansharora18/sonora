@@ -10,9 +10,10 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import dev.sonora.backend.radio.RadioArtistDirectory
 import dev.sonora.backend.radio.RadioBuilder
-import dev.sonora.backend.radio.RadioMode
 import dev.sonora.backend.radio.RadioSeed
 import dev.sonora.backend.radio.RadioSetup
+import dev.sonora.backend.radio.RadioState
+import dev.sonora.backend.radio.SavedRadio
 import dev.sonora.backend.radio.RadioStore
 import dev.sonora.backend.taste.Origin
 import dev.sonora.backend.taste.TasteEngine
@@ -486,10 +487,10 @@ object SonoraBackend {
     @Volatile
     private var radioBuilder: RadioBuilder? = null
 
-    private val _radio = MutableStateFlow(RadioSetup())
+    private val _radio = MutableStateFlow(RadioState())
 
-    /** The picked artists and the mix last chosen. */
-    val radio: StateFlow<RadioSetup> = _radio.asStateFlow()
+    /** The draft being edited and every saved radio. */
+    val radio: StateFlow<RadioState> = _radio.asStateFlow()
 
     /** The mix a refill continues. Null once the queue is no longer the mix's. */
     @Volatile
@@ -557,24 +558,69 @@ object SonoraBackend {
      * adding an artist wait on the network.
      */
     fun addRadioSeed(context: Context, seed: RadioSeed) {
-        persistRadio(context, _radio.value.withSeed(seed))
+        persistDraft(context) { it.withSeed(seed) }
         if (seed.browseId != null) return
 
         scope.launch {
             val resolved = runCatching { radioDirectory(context).resolve(seed.name) }.getOrNull()
-            if (resolved != null) persistRadio(context, _radio.value.withResolved(resolved))
+            if (resolved != null) persistDraft(context) { it.withResolved(resolved) }
         }
     }
 
     fun removeRadioSeed(context: Context, name: String) =
-        persistRadio(context, _radio.value.withoutSeed(name))
+        persistDraft(context) { it.withoutSeed(name) }
 
-    fun setRadioMode(context: Context, mode: RadioMode) =
-        persistRadio(context, _radio.value.copy(mode = mode))
+    fun setRadioVariety(context: Context, variety: Float) =
+        persistDraft(context) { it.copy(variety = variety.coerceIn(0f, 1f)) }
 
-    private fun persistRadio(context: Context, setup: RadioSetup) {
-        _radio.value = setup
-        scope.launch(Dispatchers.IO) { radioStore(context).save(setup) }
+    fun setRadioFamiliar(context: Context, familiarOnly: Boolean) =
+        persistDraft(context) { it.copy(familiarOnly = familiarOnly) }
+
+    private fun persistDraft(context: Context, edit: (RadioSetup) -> RadioSetup) {
+        persistRadio(context, _radio.value.copy(draft = edit(_radio.value.draft)))
+    }
+
+    private fun persistRadio(context: Context, state: RadioState) {
+        _radio.value = state
+        scope.launch(Dispatchers.IO) { radioStore(context).save(state) }
+    }
+
+    /**
+     * Keeps the draft as a radio, and returns it.
+     *
+     * Saving the same artists twice with different variety makes two radios on purpose: the mix is
+     * the ingredients, and two settings of them are two things worth going back to.
+     */
+    fun saveRadio(context: Context, name: String = ""): SavedRadio? {
+        val draft = _radio.value.draft
+        if (!draft.isReady) return null
+
+        val radio = SavedRadio(
+            id = UUID.randomUUID().toString(),
+            name = name.trim().ifBlank { defaultRadioName(draft) },
+            seeds = draft.seeds,
+            variety = draft.variety,
+            familiarOnly = draft.familiarOnly,
+            createdAt = System.currentTimeMillis(),
+        )
+        persistRadio(context, _radio.value.withRadio(radio))
+        return radio
+    }
+
+    fun deleteRadio(context: Context, id: String) =
+        persistRadio(context, _radio.value.without(id))
+
+    /** Loads a saved radio back into the draft, ready to tune or press play on. */
+    fun editRadio(context: Context, id: String) {
+        val radio = _radio.value.saved.firstOrNull { it.id == id } ?: return
+        persistDraft(context) { radio.toDraft() }
+    }
+
+    /** The name a saved radio gets when the listener does not give it one. */
+    fun defaultRadioName(setup: RadioSetup): String {
+        val names = setup.seeds.take(2).joinToString(", ") { it.name }
+        val rest = setup.seeds.size - 2
+        return if (rest > 0) "$names +$rest" else names.ifBlank { "Radio" }
     }
 
     /**
@@ -607,16 +653,23 @@ object SonoraBackend {
      * Empty when nothing could be built — no artists picked, no network, or every seed silent —
      * which is the screen's cue to say so rather than start an empty player.
      */
-    suspend fun startRadio(context: Context, mode: RadioMode): List<LibraryTrack> {
-        val setup = _radio.value.copy(mode = mode)
-        persistRadio(context, setup)
+    suspend fun startRadio(context: Context): List<LibraryTrack> =
+        startRadio(context, _radio.value.draft)
 
+    /** Plays a saved radio without disturbing the draft it was saved from. */
+    suspend fun startSavedRadio(context: Context, id: String): List<LibraryTrack> {
+        val radio = _radio.value.saved.firstOrNull { it.id == id } ?: return emptyList()
+        return startRadio(context, radio.toDraft())
+    }
+
+    private suspend fun startRadio(context: Context, setup: RadioSetup): List<LibraryTrack> {
         val tracks = buildRadio(context, setup)
         if (tracks.isNotEmpty()) {
             activeRadio = setup
             activeRadioKeys = tracks.mapTo(HashSet()) { it.key }
             _activeRadioLabel.value =
-                setup.mode.label + " · " + setup.seeds.joinToString(", ") { it.name }
+                (if (setup.familiarOnly) "Familiar · " else "Radio · ") +
+                setup.seeds.joinToString(", ") { it.name }
         }
         return tracks
     }
@@ -632,7 +685,7 @@ object SonoraBackend {
         val library = withContext(Dispatchers.Default) { _library.value.map { it.toTrackRef() } }
 
         val refs = withContext(Dispatchers.Default) {
-            builder.build(setup = setup, mode = setup.mode, library = library, count = count)
+            builder.build(setup = setup, library = library, count = count)
         }
         return refs.mapNotNull { it.toLibraryTrack() }
     }

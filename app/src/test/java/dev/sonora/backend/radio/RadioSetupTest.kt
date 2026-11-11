@@ -56,30 +56,62 @@ class RadioSetupTest {
     }
 
     @Test
-    fun `a stored setup reads back with its seeds and mode`() {
+    fun `a saved radio reads back with its variety and familiar flag`() {
         val file = File(folder.root, "radio.json")
         val store = RadioStore(file)
-        val original = setup("Billie Eilish", "Khalid").copy(mode = RadioMode.DISCOVER)
+        val radio = SavedRadio(
+            id = "r1",
+            name = "Billie Eilish, Khalid",
+            seeds = setup("Billie Eilish", "Khalid").seeds,
+            variety = 0.75f,
+            familiarOnly = true,
+        )
+        val state = RadioState(draft = setup("Khalid"), saved = listOf(radio))
 
-        store.save(original)
+        store.save(state)
         val read = store.load()
 
-        assertEquals(original.seeds, read.seeds)
-        assertEquals(RadioMode.DISCOVER, read.mode)
+        assertEquals(1, read.saved.size)
+        assertEquals(radio, read.saved.first())
+        assertEquals(0.75f, read.saved.first().variety, 0.0001f)
+        assertTrue(read.saved.first().familiarOnly)
+        assertEquals(listOf("Khalid"), read.draft.seeds.map { it.name })
     }
 
     @Test
-    fun `an unreadable document reads back as an empty setup`() {
+    fun `an unreadable document reads back as an empty state`() {
         val file = File(folder.root, "radio.json").apply { writeText("{not json") }
 
         val read = RadioStore(file).load()
 
-        assertTrue(read.seeds.isEmpty())
-        assertEquals(RadioMode.BLENDED, read.mode)
+        assertTrue(read.saved.isEmpty())
+        assertTrue(read.draft.seeds.isEmpty())
     }
 
     @Test
-    fun `an unknown mode name falls back to the default`() {
-        assertEquals(RadioMode.BLENDED, RadioMode.fromName("SOMETHING_NEW"))
+    fun `a saved radio comes back into the draft with its own settings`() {
+        val radio = SavedRadio(
+            id = "r1",
+            name = "Mix",
+            seeds = listOf(RadioSeed("Khalid")),
+            variety = 1f,
+            familiarOnly = true,
+        )
+
+        val draft = radio.toDraft()
+
+        assertEquals(1f, draft.variety, 0.0001f)
+        assertTrue(draft.familiarOnly)
+        assertEquals(listOf("Khalid"), draft.seeds.map { it.name })
+    }
+
+    @Test
+    fun `saving the same artists twice keeps both radios`() {
+        val a = SavedRadio(id = "a", name = "One", seeds = listOf(RadioSeed("Khalid")), variety = 0f)
+        val b = SavedRadio(id = "b", name = "Two", seeds = listOf(RadioSeed("Khalid")), variety = 1f)
+
+        val state = RadioState().withRadio(a).withRadio(b)
+
+        assertEquals(listOf("b", "a"), state.saved.map { it.id }.sortedDescending())
     }
 }

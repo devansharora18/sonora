@@ -3,6 +3,7 @@ package dev.sonora.backend.radio
 import dev.sonora.backend.taste.RankProfile
 import dev.sonora.backend.taste.TasteEngine
 import dev.sonora.backend.taste.TrackRef
+import kotlin.math.roundToInt
 
 /**
  * Turns a set of picked artists into one of the three mixes.
@@ -25,13 +26,17 @@ class RadioBuilder(
     /**
      * A mix of up to [count] tracks, or an empty list when there is nothing to build from.
      *
+     * The whole feature is one proportion: how much of the queue is the picked artists and how much
+     * is the artists around them. [RadioSetup.variety] sets that proportion directly, so there is
+     * no mode to choose between — 0 is only the picks, 1 is almost all neighbours, and every value
+     * between is the mix the listener asked for.
+     *
      * @param library everything the app knows about, as refs — a downloaded album by a picked
-     *   artist belongs in a blended or familiar mix even if it has never been played.
+     *   artist belongs in the mix even if it has never been played.
      * @param cur the track playing now, so the mix does not open with it.
      */
     suspend fun build(
         setup: RadioSetup,
-        mode: RadioMode,
         library: List<TrackRef>,
         cur: TrackRef? = null,
         count: Int = MIX_SIZE,
@@ -39,130 +44,89 @@ class RadioBuilder(
         if (!setup.isReady || count <= 0) return emptyList()
 
         val seedKeys = setup.seeds.mapTo(HashSet()) { it.key }
-        val fromPickedArtists = library.filter { it.artistKey in seedKeys }
-
-        return when (mode) {
-            RadioMode.BLENDED -> blended(setup, fromPickedArtists, cur, count)
-            RadioMode.FAMILIAR -> familiar(fromPickedArtists, cur, count)
-            RadioMode.DISCOVER -> discover(setup, library, seedKeys, cur, count)
-        }
-    }
-
-    /**
-     * The picked artists, their neighbours, and everything the model already likes.
-     *
-     * Unfiltered on purpose: this is the mix that is supposed to feel like the listener's own
-     * library with new things in it, so nothing is excluded — the scorer decides the balance.
-     */
-    private suspend fun blended(
-        setup: RadioSetup,
-        fromPickedArtists: List<TrackRef>,
-        cur: TrackRef?,
-        count: Int,
-    ): List<TrackRef> {
-        val pool = LinkedHashMap<String, TrackRef>()
-
-        engine.candidates(cur).forEach { pool[it.key] = it }
-        fromPickedArtists.forEach { pool[it.key] = it }
-
-        for (seed in setup.seeds) {
-            for (ref in radioOf(seed)) if (pool[ref.key] == null) pool[ref.key] = ref
-        }
-
-        return engine.rank(pool.values.toList(), cur, count, RankProfile.DEFAULT)
-    }
-
-    /**
-     * Only what this listener has already been through.
-     *
-     * No radio at all: a mix that says "familiar" and then plays something unheard would be a lie,
-     * and the pool filter is the only thing that can promise it.
-     */
-    private suspend fun familiar(
-        fromPickedArtists: List<TrackRef>,
-        cur: TrackRef?,
-        count: Int,
-    ): List<TrackRef> {
         val model = engine.snapshot()
-        val pool = LinkedHashMap<String, TrackRef>()
 
-        engine.candidates(cur).forEach { pool[it.key] = it }
-        // A downloaded album is the listener's own music whether or not the model has seen a play
-        // of it, so a file is evidence enough to count as familiar.
-        fromPickedArtists.forEach { pool[it.key] = it }
+        val radio = setup.seeds.flatMap { radioOf(it) }
+        val candidates = engine.candidates(cur)
 
-        val known = pool.values.filter { ref ->
-            val stats = model.tracks[ref.key]?.stats
-            (stats?.plays ?: 0) > 0 || stats?.liked == true || ref.localPath != null
+        val fromSeeds = LinkedHashMap<String, TrackRef>()
+        val fromOthers = LinkedHashMap<String, TrackRef>()
+
+        fun offer(ref: TrackRef, into: LinkedHashMap<String, TrackRef>) {
+            if (into[ref.key] == null) into[ref.key] = ref
         }
 
-        return engine.rank(known, cur, count, RankProfile.FAMILIAR)
-    }
+        for (ref in radio) offer(ref, if (ref.artistKey in seedKeys) fromSeeds else fromOthers)
+        for (ref in candidates) offer(ref, if (ref.artistKey in seedKeys) fromSeeds else fromOthers)
+        for (ref in library) offer(ref, if (ref.artistKey in seedKeys) fromSeeds else fromOthers)
 
-    /**
-     * Music near the picks that this listener has not played.
-     *
-     * A second hop only when the first did not fill the pool: every extra hop is another request
-     * before the first track plays, and a single seed's radio is usually enough on its own.
-     */
-    private suspend fun discover(
-        setup: RadioSetup,
-        library: List<TrackRef>,
-        seedKeys: Set<String>,
-        cur: TrackRef?,
-        count: Int,
-    ): List<TrackRef> {
-        val pool = LinkedHashMap<String, TrackRef>()
-        val firstHop = setup.seeds.flatMap { radioOf(it) }
-        firstHop.forEach { pool[it.key] = it }
-
-        if (pool.size < count) {
-            firstHop.distinctBy { it.key }.take(SECOND_HOP_SEEDS).forEach { ref ->
-                for (next in runCatching { relatedTo(ref) }.getOrDefault(emptyList())) {
-                    if (pool[next.key] == null) pool[next.key] = next
+        // One step out, only when the picks' own radios did not bring enough back with them: every
+        // hop is another request before the first track plays.
+        if (fromSeeds.size + fromOthers.size < count && radio.isNotEmpty()) {
+            for (seedTrack in radio.filter { it.artistKey in seedKeys }.take(SECOND_HOP_SEEDS)) {
+                for (next in runCatching { relatedTo(seedTrack) }.getOrDefault(emptyList())) {
+                    offer(next, if (next.artistKey in seedKeys) fromSeeds else fromOthers)
                 }
             }
         }
 
-        val model = engine.snapshot()
-        val libraryKeys = library.mapTo(HashSet()) { it.key }
-        val unheard = pool.values.filter { ref ->
-            ref.key !in libraryKeys && (model.tracks[ref.key]?.stats?.plays ?: 0) == 0
-        }
+        val selected = if (setup.familiarOnly) fromSeeds.values.filter { isKnown(it, model) } else fromSeeds.values.toList()
+        val others = if (setup.familiarOnly) fromOthers.values.filter { isKnown(it, model) } else fromOthers.values.toList()
 
-        // Ordered as a whole rather than straight to `count`, because the artist cap below drops
-        // entries and would otherwise leave the mix short: a radio seeded by one artist returns
-        // mostly that artist, which is exactly what Discover has to cut back.
-        val ordered = unheard.take(MAX_DISCOVER_POOL)
-        val ranked = engine.rank(ordered, cur, ordered.size, RankProfile.DISCOVER)
-        return cappedToSelectedArtists(ranked, seedKeys, count)
+        if (selected.isEmpty() && others.isEmpty()) return emptyList()
+
+        // Both halves are ordered before they are blended, so the mix is "the best of these
+        // artists, interleaved with the best of the rest" rather than the two races in one list.
+        val selectedProfile = if (setup.familiarOnly) RankProfile.FAMILIAR else RankProfile.DEFAULT
+        val otherProfile = if (setup.familiarOnly) RankProfile.FAMILIAR else RankProfile.DISCOVER
+
+        return blend(
+            selected = engine.rank(selected, cur, selected.size, selectedProfile),
+            others = engine.rank(others, cur, others.size, otherProfile),
+            variety = setup.variety,
+            count = count,
+        )
     }
 
     /**
-     * Keeps at most a third of the mix by the picked artists.
+     * Interleaves the two halves at the share [variety] asks for.
      *
-     * A picked artist may appear — that is what "around" means — but a Discover mix that turns out
-     * to be the picked artist's discography is just Blended with a different name.
+     * A target rather than a fixed pattern: at each slot it asks how many picked-artist tracks the
+     * mix should hold by now and takes one of those if it is behind. That gives 0 and 1 their exact
+     * meanings at the ends of the slider and an even spread everywhere else, and it never leaves a
+     * run of one kind because the other ran out early.
      */
-    private fun cappedToSelectedArtists(
-        ranked: List<TrackRef>,
-        seedKeys: Set<String>,
+    private fun blend(
+        selected: List<TrackRef>,
+        others: List<TrackRef>,
+        variety: Float,
         count: Int,
     ): List<TrackRef> {
-        val cap = (count / DISCOVER_SELECTED_FRACTION).coerceAtLeast(1)
-        var selected = 0
+        val selectedShare = 1.0 - variety.coerceIn(0f, 1f)
         val out = ArrayList<TrackRef>(count)
+        var fromSelected = 0
+        var fromOthers = 0
 
-        for (ref in ranked) {
-            if (ref.artistKey in seedKeys) {
-                if (selected >= cap) continue
-                selected++
+        for (slot in 0 until count) {
+            val wanted = ((slot + 1) * selectedShare).roundToInt()
+
+            val takeSelected = when {
+                fromSelected < selected.size && fromOthers < others.size -> fromSelected < wanted
+                fromSelected < selected.size -> true
+                fromOthers < others.size -> false
+                else -> break
             }
-            out += ref
-            if (out.size == count) break
+
+            out += if (takeSelected) selected[fromSelected++] else others[fromOthers++]
         }
 
         return out
+    }
+
+    /** Whether the model has evidence this listener has been through the track before. */
+    private fun isKnown(ref: TrackRef, model: dev.sonora.backend.taste.TasteModel): Boolean {
+        val stats = model.tracks[ref.key]?.stats
+        return (stats?.plays ?: 0) > 0 || stats?.liked == true || ref.localPath != null
     }
 
     /** One seed's radio, degrading to nothing rather than failing the whole mix. */
@@ -174,13 +138,7 @@ class RadioBuilder(
         /** How many tracks one mix queues up front. */
         const val MIX_SIZE = 40
 
-        /** How many first-hop tracks Discover is allowed to walk one step further from. */
+        /** How many of the picks' tracks are allowed to seed one more hop. */
         const val SECOND_HOP_SEEDS = 3
-
-        /** The share of a Discover mix that may be the picked artists, as a divisor. */
-        const val DISCOVER_SELECTED_FRACTION = 3
-
-        /** The most candidates a Discover mix will order. Bounds the O(n²) sampling. */
-        const val MAX_DISCOVER_POOL = 200
     }
 }
