@@ -140,7 +140,7 @@ fun RadioScreen(
                 if (index > 0) RowDivider()
                 SeedRow(
                     seed = seed,
-                    onRemove = { SonoraBackend.removeRadioSeed(context, seed.name) },
+                    onRemove = { SonoraBackend.removeRadioSeed(context, seed) },
                 )
             }
 
@@ -520,8 +520,8 @@ private fun ArtistPickerSheet(
     // the list. Deduped here rather than keyed by index so a row keeps its identity as results
     // arrive and disappear.
     val shown = (if (query.isBlank()) suggestions else results)
-        .distinctBy { it.browseId ?: it.key }
-    val picked = remember(selected) { selected.mapTo(HashSet()) { it.key } }
+        .distinctBy { it.identity }
+    val picked = remember(selected) { selected.mapTo(HashSet()) { it.identity } }
 
     SonoraSheet(onDismiss = onDismiss) {
         Column(
@@ -566,10 +566,10 @@ private fun ArtistPickerSheet(
                         }
                     }
 
-                    items(shown, key = { it.browseId ?: it.name }) { seed ->
+                    items(shown, key = { it.identity }) { seed ->
                         PickerRow(
                             seed = seed,
-                            added = seed.key in picked,
+                            added = seed.identity in picked,
                             atLimit = selected.size >= RadioSetup.MAX_SEEDS,
                             onAdd = { onAdd(seed) },
                         )

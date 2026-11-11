@@ -18,8 +18,18 @@ data class RadioSeed(
     val browseId: String? = null,
     val artworkUrl: String? = null,
 ) {
-    /** The identity used to tell two picks apart. The name, folded the same way the model folds it. */
+    /** The name, folded the same way the taste model folds it. */
     val key: String get() = TrackIdentity.artistKey(name)
+
+    /**
+     * What tells two picks apart.
+     *
+     * The catalogue's artist id when there is one, because names are not unique: a search for
+     * "Passenger" returns six different artists, and deduping them by name made five of them
+     * unaddable and all six read as already added. A pick from the listening history starts with a
+     * name only, so the folded name is the fallback until the directory resolves it.
+     */
+    val identity: String get() = browseId?.takeIf { it.isNotBlank() } ?: key
 }
 
 /**
@@ -57,15 +67,13 @@ data class RadioSetup(
     fun withSeed(seed: RadioSeed): RadioSetup {
         if (seed.name.isBlank()) return this
         if (seeds.size >= MAX_SEEDS) return this
-        if (seeds.any { it.key == seed.key }) return this
+        if (seeds.any { it.identity == seed.identity }) return this
         return copy(seeds = seeds + seed)
     }
 
-    /** Removes the seed with this name, matching the way [RadioSeed.key] does. */
-    fun withoutSeed(name: String): RadioSetup {
-        val key = TrackIdentity.artistKey(name)
-        return copy(seeds = seeds.filterNot { it.key == key })
-    }
+    /** Removes this exact pick — by artist id where there is one, so a namesake survives. */
+    fun without(seed: RadioSeed): RadioSetup =
+        copy(seeds = seeds.filterNot { it.identity == seed.identity })
 
     /**
      * The same selection with [seed] resolved — its real id and artwork.
@@ -74,7 +82,11 @@ data class RadioSetup(
      * is upgraded in place so the next open costs no lookup.
      */
     fun withResolved(seed: RadioSeed): RadioSetup = copy(
-        seeds = seeds.map { stored -> if (stored.key == seed.key) seed else stored },
+        seeds = seeds.map { stored ->
+            // Only a name-only pick is upgraded: an already-resolved namesake must not be replaced
+            // by whichever one the directory happened to answer first.
+            if (stored.key == seed.key && stored.browseId == null) seed else stored
+        },
     )
 
     companion object {

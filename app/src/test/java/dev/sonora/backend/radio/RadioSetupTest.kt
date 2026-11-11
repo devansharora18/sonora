@@ -34,10 +34,41 @@ class RadioSetupTest {
     }
 
     @Test
-    fun `removing a seed folds the name the way picking it did`() {
-        val remaining = setup("Billie Eilish", "Khalid").withoutSeed("BILLIE EILISH")
+    fun `removing a seed matches the pick, not the spelling`() {
+        val setup = RadioSetup().withSeed(RadioSeed("Billie Eilish", browseId = "UC_a"))
+        val remaining = setup.without(RadioSeed("billie eilish", browseId = "UC_a"))
 
-        assertEquals(listOf("Khalid"), remaining.seeds.map { it.name })
+        assertTrue(remaining.seeds.isEmpty())
+    }
+
+    @Test
+    fun `two artists with the same name are two different picks`() {
+        val setup = RadioSetup()
+            .withSeed(RadioSeed("Passenger", browseId = "UC_one"))
+            .withSeed(RadioSeed("Passenger", browseId = "UC_two"))
+
+        assertEquals(2, setup.seeds.size)
+    }
+
+    @Test
+    fun `removing one namesake leaves the other`() {
+        val first = RadioSeed("Passenger", browseId = "UC_one")
+        val second = RadioSeed("Passenger", browseId = "UC_two")
+        val remaining = RadioSetup().withSeed(first).withSeed(second).without(first)
+
+        assertEquals(listOf("UC_two"), remaining.seeds.map { it.browseId })
+    }
+
+    @Test
+    fun `a name-only pick is the one resolution upgrades`() {
+        val nameOnly = RadioSeed("Passenger")
+        val resolved = RadioSeed("Passenger", browseId = "UC_two")
+
+        val setup = RadioSetup().withSeed(nameOnly).withSeed(resolved).withResolved(
+            RadioSeed("Passenger", browseId = "UC_one"),
+        )
+
+        assertEquals(listOf("UC_one", "UC_two"), setup.seeds.map { it.browseId })
     }
 
     @Test

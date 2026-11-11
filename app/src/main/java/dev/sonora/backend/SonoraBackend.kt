@@ -573,8 +573,8 @@ object SonoraBackend {
         }
     }
 
-    fun removeRadioSeed(context: Context, name: String) =
-        persistDraft(context) { it.withoutSeed(name) }
+    fun removeRadioSeed(context: Context, seed: RadioSeed) =
+        persistDraft(context) { it.without(seed) }
 
     fun setRadioStop(context: Context, stop: Int) =
         persistDraft(context) { it.withStop(stop) }
