@@ -25,11 +25,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.rounded.Radio
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,7 +44,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sonora.backend.asLibraryTrack
@@ -71,6 +70,7 @@ fun HomeScreen(
     onOpenPlaylist: (String) -> Unit,
     onImportSpotify: () -> Unit = {},
     onOpenRadio: () -> Unit = {},
+    onPlayRadio: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val tracks by SonoraBackend.library.collectAsState()
@@ -111,6 +111,8 @@ fun HomeScreen(
     val orderedPlaylists = remember(playlists) {
         playlists.sortedByDescending { it.id == Playlists.LIKED_ID }
     }
+
+    val radioState by SonoraBackend.radio.collectAsState()
 
     val activeDownload = download as? DownloadState.Downloading
 
@@ -171,6 +173,14 @@ fun HomeScreen(
                     },
                     onOpen = { entry -> SonoraPlayer.play(context, entry.tracks, 0) },
                 )
+            }
+        }
+
+        // Saved radios sit above the library shelves: a radio is something the listener made,
+        // like a playlist, and it is the only row here that starts a mix rather than resuming one.
+        if (radioState.saved.isNotEmpty()) {
+            item(key = "saved-radios") {
+                RadiosRow(radios = radioState.saved, onPlay = onPlayRadio)
             }
         }
 
@@ -257,6 +267,36 @@ private fun RadioEntryCard(onClick: () -> Unit) {
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * The radios the listener kept, as a shelf of cards.
+ *
+ * Tapping one plays it — the same thing tapping an album card does — because a saved radio is a
+ * thing to listen to, not a settings entry. Tuning lives on the Radio screen, one tap away from the
+ * card that opens it.
+ */
+@Composable
+private fun RadiosRow(radios: List<dev.sonora.backend.radio.SavedRadio>, onPlay: (String) -> Unit) {
+    Column {
+        SectionHeader(title = "Your radios", subtitle = "Mixes you saved")
+
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+            horizontalArrangement = Arrangement.spacedBy(SHELF_SPACING),
+        ) {
+            items(radios, key = { it.id }) { radio ->
+                ShelfCard(
+                    artwork = null,
+                    icon = Icons.Rounded.Radio,
+                    title = radio.name,
+                    subtitle = radioSummary(radio),
+                    titleLines = 2,
+                    onClick = { onPlay(radio.id) },
+                )
+            }
+        }
     }
 }
 
@@ -459,44 +499,6 @@ private fun DownloadingCard(
                     .height(4.dp)
                     .background(MaterialTheme.colorScheme.accentText),
             )
-        }
-    }
-}
-
-@Composable
-private fun GettingStarted(onRunSearch: (String) -> Unit) {
-    val history by SonoraBackend.searchHistory.collectAsState()
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(text = "Sonora", style = MaterialTheme.typography.headlineMedium)
-        Text(
-            text = "Search the Soulseek network to find music. What you download shows up here.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
-
-        if (history.isNotEmpty()) {
-            Row(
-                modifier = Modifier.padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Try again:",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                TextButton(onClick = { onRunSearch(history.first()) }) {
-                    Text(history.first())
-                }
-            }
         }
     }
 }
