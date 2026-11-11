@@ -58,6 +58,7 @@ import dev.sonora.ui.theme.accentText
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /** The artist disc size in the picker and the picked list. */
 private val SEED_ART = 40.dp
@@ -164,7 +165,7 @@ fun RadioScreen(
         VarietyPanel(
             setup = draft,
             enabled = draft.isReady,
-            onChange = { SonoraBackend.setRadioVariety(context, it) },
+            onChange = { stop -> SonoraBackend.setRadioStop(context, stop) },
             onFamiliarChange = { SonoraBackend.setRadioFamiliar(context, it) },
         )
 
@@ -271,19 +272,28 @@ fun RadioScreen(
 private fun VarietyPanel(
     setup: RadioSetup,
     enabled: Boolean,
-    onChange: (Float) -> Unit,
+    onChange: (Int) -> Unit,
     onFamiliarChange: (Boolean) -> Unit,
 ) {
+    // The thumb follows the finger while it is down and snaps to a stop when it lifts. Snapping
+    // during the drag would fight the gesture; not snapping at all would leave the mix on a share
+    // the caption cannot name.
+    var dragging by remember { mutableStateOf<Float?>(null) }
+    val shownStop = dragging?.let { setup.stopFor(it) } ?: setup.stop
+
     SettingsGroup(header = "Variety") {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
             Slider(
-                value = setup.variety,
-                onValueChange = onChange,
+                value = dragging ?: setup.variety,
+                onValueChange = { dragging = it },
+                onValueChangeFinished = {
+                    dragging?.let { onChange(setup.stopFor(it)) }
+                    dragging = null
+                },
                 enabled = enabled,
                 valueRange = 0f..1f,
-                // Four steps, so the slider has five positions and a thumb that lands on one
-                // rather than on a float nobody can name.
-                steps = 3,
+                // One step per gap between the five ratios.
+                steps = RadioSetup.SHARES.size - 2,
                 colors = SliderDefaults.colors(
                     thumbColor = MaterialTheme.colorScheme.accentText,
                     activeTrackColor = MaterialTheme.colorScheme.accentText,
@@ -312,7 +322,7 @@ private fun VarietyPanel(
             Spacer(Modifier.height(10.dp))
 
             Text(
-                text = varietyCaption(setup),
+                text = varietyCaption(setup, shownStop),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onBackground,
             )
@@ -329,8 +339,8 @@ private fun VarietyPanel(
     }
 }
 
-/** What the slider currently means, in the listener's own artists. */
-private fun varietyCaption(setup: RadioSetup): String {
+/** What the slider currently means, as the ratio the mix will be built at. */
+private fun varietyCaption(setup: RadioSetup, stop: Int): String {
     val names = when (setup.seeds.size) {
         0 -> "your artists"
         1 -> setup.seeds.first().name
@@ -338,11 +348,10 @@ private fun varietyCaption(setup: RadioSetup): String {
         else -> "${setup.seeds.take(2).joinToString(", ") { it.name }} and more"
     }
 
-    return when {
-        setup.variety <= 0.01f -> "Only $names. Nothing from outside them."
-        setup.variety < 0.4f -> "Mostly $names, with a few artists around them."
-        setup.variety < 0.7f -> "A mix of $names and new artists."
-        else -> "Mostly new artists, chosen from around $names."
+    val share = (RadioSetup.SHARES[stop.coerceIn(0, RadioSetup.SHARES.lastIndex)] * 100).roundToInt()
+    return when (share) {
+        100 -> "Only $names, the whole queue."
+        else -> "$share% $names · ${100 - share}% from around them."
     }
 }
 
@@ -409,13 +418,10 @@ internal fun SavedRadioRow(
 /** "3 artists · a mix of theirs and new" — enough to tell two saved radios apart. */
 internal fun radioSummary(radio: SavedRadio): String {
     val artists = if (radio.seeds.size == 1) "1 artist" else "${radio.seeds.size} artists"
-    val reach = when {
-        radio.variety <= 0.01f -> "only them"
-        radio.variety < 0.4f -> "mostly them"
-        radio.variety < 0.7f -> "mixed"
-        else -> "mostly new"
-    }
-    return if (radio.familiarOnly) "$artists · familiar only" else "$artists · $reach"
+    if (radio.familiarOnly) return "$artists · familiar only"
+
+    val share = (RadioSetup.SHARES[radio.stop.coerceIn(0, RadioSetup.SHARES.lastIndex)] * 100).roundToInt()
+    return if (share == 100) "$artists · only them" else "$artists · $share% them"
 }
 
 /** One picked artist: a disc, a name, and the way to take it back off. */
@@ -510,7 +516,11 @@ private fun ArtistPickerSheet(
         }
     }
 
-    val shown = if (query.isBlank()) suggestions else results
+    // Two artists whose names fold together are one pick, and two rows with the same key crash
+    // the list. Deduped here rather than keyed by index so a row keeps its identity as results
+    // arrive and disappear.
+    val shown = (if (query.isBlank()) suggestions else results)
+        .distinctBy { it.browseId ?: it.key }
     val picked = remember(selected) { selected.mapTo(HashSet()) { it.key } }
 
     SonoraSheet(onDismiss = onDismiss) {
@@ -556,7 +566,7 @@ private fun ArtistPickerSheet(
                         }
                     }
 
-                    items(shown, key = { it.key.ifBlank { it.name } }) { seed ->
+                    items(shown, key = { it.browseId ?: it.name }) { seed ->
                         PickerRow(
                             seed = seed,
                             added = seed.key in picked,

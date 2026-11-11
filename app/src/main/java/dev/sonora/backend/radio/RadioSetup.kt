@@ -1,6 +1,7 @@
 package dev.sonora.backend.radio
 
 import dev.sonora.backend.taste.TrackIdentity
+import kotlin.math.roundToInt
 import kotlinx.serialization.Serializable
 
 /**
@@ -24,18 +25,31 @@ data class RadioSeed(
 /**
  * The picked artists and how far the mix should roam, as one document.
  *
- * [variety] is the whole control, expressed as one number: at 0 the mix is only the artists that
- * were picked, and at 1 it is almost entirely artists around them. Everything between is a
- * proportion, not a mode — which is what makes it a slider instead of three buttons that each
- * pretend to be the same kind of thing.
+ * The reach is one of five stops, each an exact share of the queue that comes from the picked
+ * artists: 100:0, 80:20, 60:40, 50:50, 30:70. Five ratios rather than a continuous float because
+ * these are the points a listener can actually name — "mostly mine" is a number, "0.37" is not —
+ * and because a mix that hits them exactly can be explained in one line.
  */
 @Serializable
 data class RadioSetup(
     val seeds: List<RadioSeed> = emptyList(),
-    val variety: Float = DEFAULT_VARIETY,
-    /** Only music already played, liked or downloaded, whatever the variety. */
+    /** Which stop of [SHARES] the slider is on. */
+    val stop: Int = DEFAULT_STOP,
+    /** Only music already played, liked or downloaded, whatever the reach. */
     val familiarOnly: Boolean = false,
 ) {
+
+    /** The share of the mix that must be the picked artists, whichever stop is selected. */
+    val selectedShare: Float get() = SHARES[stop.coerceIn(0, SHARES.lastIndex)]
+
+    /** The slider's position, 0…1, for a control with one step per stop. */
+    val variety: Float get() = stop.coerceIn(0, SHARES.lastIndex) / (SHARES.size - 1).toFloat()
+
+    fun withStop(stop: Int): RadioSetup = copy(stop = stop.coerceIn(0, SHARES.lastIndex))
+
+    /** The stop nearest a slider position, so the control snaps to the five ratios. */
+    fun stopFor(variety: Float): Int =
+        (variety.coerceIn(0f, 1f) * (SHARES.size - 1)).roundToInt().coerceIn(0, SHARES.lastIndex)
 
     val isReady: Boolean get() = seeds.isNotEmpty()
 
@@ -67,7 +81,15 @@ data class RadioSetup(
         /** The most artists one mix can be built from. */
         const val MAX_SEEDS = 5
 
-        /** Where the slider starts: mostly the picks, with a few neighbours. */
-        const val DEFAULT_VARIETY = 0.3f
+        /**
+         * The five stops, as the picked artists' share of the queue.
+         *
+         * Not evenly spaced, and the last one still keeps 30% for the picks: the far end of the
+         * slider is "mostly new", not "nothing you asked for".
+         */
+        val SHARES = floatArrayOf(1.0f, 0.8f, 0.6f, 0.5f, 0.3f)
+
+        /** Where the slider starts: mostly the picks, a fifth from around them. */
+        const val DEFAULT_STOP = 1
     }
 }

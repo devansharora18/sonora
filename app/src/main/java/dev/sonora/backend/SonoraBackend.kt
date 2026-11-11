@@ -84,6 +84,9 @@ object SonoraBackend {
     /** A broad query can match hundreds of thousands of files; keep the list bounded. */
     private const val MAX_RETAINED_HITS = 500
 
+    /** The fewest characters worth asking the catalogue about while the listener is still typing. */
+    private const val LIVE_SEARCH_MIN_CHARS = 2
+
     private val AUDIO_EXTENSIONS = setOf("mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "wma", "aiff", "alac")
 
     private val WHITESPACE = Regex("\\s+")
@@ -541,6 +544,9 @@ object SonoraBackend {
                         YtmRadio.related(videoId).map { it.toTrackRef() }
                     }
                 },
+                seedCatalogue = { seed ->
+                    directory.tracksFor(seed).map { it.toTrackRef() }
+                },
             ).also { radioBuilder = it }
         }
     }
@@ -570,8 +576,8 @@ object SonoraBackend {
     fun removeRadioSeed(context: Context, name: String) =
         persistDraft(context) { it.withoutSeed(name) }
 
-    fun setRadioVariety(context: Context, variety: Float) =
-        persistDraft(context) { it.copy(variety = variety.coerceIn(0f, 1f)) }
+    fun setRadioStop(context: Context, stop: Int) =
+        persistDraft(context) { it.withStop(stop) }
 
     fun setRadioFamiliar(context: Context, familiarOnly: Boolean) =
         persistDraft(context) { it.copy(familiarOnly = familiarOnly) }
@@ -599,7 +605,7 @@ object SonoraBackend {
             id = UUID.randomUUID().toString(),
             name = name.trim().ifBlank { defaultRadioName(draft) },
             seeds = draft.seeds,
-            variety = draft.variety,
+            stop = draft.stop,
             familiarOnly = draft.familiarOnly,
             createdAt = System.currentTimeMillis(),
         )
@@ -1468,6 +1474,32 @@ object SonoraBackend {
 
         loadYoutube(term)
         searchPeers(context, term, record = true, youtubeLoading = true)
+    }
+
+    /**
+     * The answer to what has been typed so far, while it is still being typed.
+     *
+     * Two things make this different from [search]. Nothing is written to the search history — a
+     * keystroke is not a search the listener would want to see offered back to them — and the peer
+     * network is only asked when [peers] is set, because a query broadcast to strangers is not
+     * worth sending once per letter. The catalogue is cheap and is what the page is mostly made of.
+     *
+     * A term already searched is not searched again, so a slow typist pausing mid-word does not
+     * re-ask for what is already on screen.
+     */
+    fun searchWhileTyping(context: Context, query: String, peers: Boolean) {
+        val term = query.trim()
+        if (term.length < LIVE_SEARCH_MIN_CHARS) return
+        if (_search.value.query == term) return
+
+        if (peers) {
+            searchPeers(context, term, record = false, youtubeLoading = true)
+        } else {
+            // Set by hand because [searchPeers] is what normally does it, and it is not being
+            // called: without this the page would still be showing the previous query's rows.
+            _search.value = SearchState(query = term, youtubeLoading = true)
+        }
+        loadYoutube(term)
     }
 
     /**

@@ -56,14 +56,14 @@ class RadioSetupTest {
     }
 
     @Test
-    fun `a saved radio reads back with its variety and familiar flag`() {
+    fun `a saved radio reads back with its stop and familiar flag`() {
         val file = File(folder.root, "radio.json")
         val store = RadioStore(file)
         val radio = SavedRadio(
             id = "r1",
             name = "Billie Eilish, Khalid",
             seeds = setup("Billie Eilish", "Khalid").seeds,
-            variety = 0.75f,
+            stop = 2,
             familiarOnly = true,
         )
         val state = RadioState(draft = setup("Khalid"), saved = listOf(radio))
@@ -73,7 +73,7 @@ class RadioSetupTest {
 
         assertEquals(1, read.saved.size)
         assertEquals(radio, read.saved.first())
-        assertEquals(0.75f, read.saved.first().variety, 0.0001f)
+        assertEquals(2, read.saved.first().stop)
         assertTrue(read.saved.first().familiarOnly)
         assertEquals(listOf("Khalid"), read.draft.seeds.map { it.name })
     }
@@ -94,21 +94,49 @@ class RadioSetupTest {
             id = "r1",
             name = "Mix",
             seeds = listOf(RadioSeed("Khalid")),
-            variety = 1f,
+            stop = 4,
             familiarOnly = true,
         )
 
         val draft = radio.toDraft()
 
-        assertEquals(1f, draft.variety, 0.0001f)
+        assertEquals(4, draft.stop)
+        assertEquals(0.3f, draft.selectedShare, 0.0001f)
         assertTrue(draft.familiarOnly)
         assertEquals(listOf("Khalid"), draft.seeds.map { it.name })
     }
 
     @Test
+    fun `the five stops are the five ratios`() {
+        assertEquals(
+            listOf(1.0f, 0.8f, 0.6f, 0.5f, 0.3f),
+            RadioSetup.SHARES.toList(),
+        )
+        assertEquals(1.0f, RadioSetup(stop = 0).selectedShare, 0.0001f)
+        assertEquals(0.3f, RadioSetup(stop = 4).selectedShare, 0.0001f)
+    }
+
+    @Test
+    fun `a slider position snaps to the nearest stop`() {
+        val setup = RadioSetup()
+
+        assertEquals(0, setup.stopFor(0f))
+        assertEquals(0, setup.stopFor(0.1f))
+        assertEquals(1, setup.stopFor(0.3f))
+        assertEquals(2, setup.stopFor(0.5f))
+        assertEquals(4, setup.stopFor(1f))
+    }
+
+    @Test
+    fun `a stop out of range is clamped rather than crashing`() {
+        assertEquals(1.0f, RadioSetup(stop = -3).selectedShare, 0.0001f)
+        assertEquals(0.3f, RadioSetup(stop = 99).selectedShare, 0.0001f)
+    }
+
+    @Test
     fun `saving the same artists twice keeps both radios`() {
-        val a = SavedRadio(id = "a", name = "One", seeds = listOf(RadioSeed("Khalid")), variety = 0f)
-        val b = SavedRadio(id = "b", name = "Two", seeds = listOf(RadioSeed("Khalid")), variety = 1f)
+        val a = SavedRadio(id = "a", name = "One", seeds = listOf(RadioSeed("Khalid")), stop = 0)
+        val b = SavedRadio(id = "b", name = "Two", seeds = listOf(RadioSeed("Khalid")), stop = 4)
 
         val state = RadioState().withRadio(a).withRadio(b)
 

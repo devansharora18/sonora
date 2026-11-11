@@ -4,6 +4,7 @@ import dev.sonora.backend.taste.TrackIdentity
 import dev.sonora.ytm.YtmBrowse
 import dev.sonora.ytm.YtmCatalogSearch
 import dev.sonora.ytm.YtmEntity
+import dev.sonora.ytm.YtmTrack
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -25,8 +26,14 @@ class RadioArtistDirectory(
     /** Name key -> the resolved artist. Empty string means "asked, no answer". */
     private val resolved = ConcurrentHashMap<String, RadioSeed>()
 
-    /** Artist id -> a video id to seed a radio with. Empty string means "asked, no answer". */
-    private val videoIds = ConcurrentHashMap<String, String>()
+    /**
+     * Artist id -> the artist's own tracks, as the page lists them.
+     *
+     * Kept whole rather than reduced to one video id, because a mix that has to be mostly the
+     * picked artists needs more of their music than one radio's worth: the radio answers with a
+     * crowd of neighbours and only a handful of the artist themselves.
+     */
+    private val catalogues = ConcurrentHashMap<String, List<YtmTrack>>()
 
     /**
      * The artist behind [name], with its id and picture, or null when YouTube has no such artist.
@@ -53,29 +60,33 @@ class RadioArtistDirectory(
     }
 
     /**
+     * The artist's own tracks, from their page.
+     *
+     * This is what a mix that is mostly the picked artists is made of. The radio seeded by one of
+     * these tracks answers with the neighbourhood — other artists, mostly — so it cannot supply the
+     * share the variety slider asks for on its own.
+     */
+    suspend fun tracksFor(seed: RadioSeed): List<YtmTrack> {
+        val artistId = seed.browseId ?: resolve(seed.name)?.browseId ?: return emptyList()
+
+        catalogues[artistId]?.let { return it }
+
+        val tracks = runCatching { page(artistId) }.getOrNull()?.tracks.orEmpty()
+        catalogues[artistId] = tracks
+        return tracks
+    }
+
+    /**
      * A video id that stands for [seed]'s artist, for seeding a radio.
      *
-     * The artist's own first track: the radio endpoint is seeded by a video, not by an artist, and
-     * an artist page's own track list is the most representative one there is.
+     * The radio endpoint is seeded by a video, not by an artist, and the artist's own first track
+     * is the most representative one there is.
      */
-    suspend fun trackFor(seed: RadioSeed): String? {
-        val artistId = seed.browseId ?: resolve(seed.name)?.browseId ?: return null
-
-        videoIds[artistId]?.let { return it.takeIf { id -> id.isNotBlank() } }
-
-        val videoId = runCatching { page(artistId) }.getOrNull()
-            ?.tracks
-            ?.firstOrNull()
-            ?.videoId
-
-        videoIds[artistId] = videoId ?: NO_VIDEO
-        return videoId
-    }
+    suspend fun trackFor(seed: RadioSeed): String? =
+        tracksFor(seed).firstOrNull()?.videoId
 
     private companion object {
         /** ConcurrentHashMap refuses null values, so "already asked, nothing there" needs a value. */
         val NO_ANSWER = RadioSeed(name = "")
-
-        const val NO_VIDEO = ""
     }
 }

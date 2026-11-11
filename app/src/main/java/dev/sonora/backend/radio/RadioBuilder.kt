@@ -19,8 +19,15 @@ class RadioBuilder(
     private val engine: TasteEngine,
     /** The radio for one picked artist: music by and around it. */
     private val seedRadio: suspend (RadioSeed) -> List<TrackRef>,
-    /** The radio for one track, used for Discover's second hop. */
+    /** The radio for one track, used for the second hop when the pools are thin. */
     private val relatedTo: suspend (TrackRef) -> List<TrackRef>,
+    /**
+     * The picked artist's own tracks.
+     *
+     * A radio seeded by that artist answers with the neighbourhood — mostly other people — so it
+     * cannot supply the share the slider asks for by itself. This is the artist's catalogue.
+     */
+    private val seedCatalogue: suspend (RadioSeed) -> List<TrackRef> = { emptyList() },
 ) {
 
     /**
@@ -60,9 +67,17 @@ class RadioBuilder(
         for (ref in candidates) offer(ref, if (ref.artistKey in seedKeys) fromSeeds else fromOthers)
         for (ref in library) offer(ref, if (ref.artistKey in seedKeys) fromSeeds else fromOthers)
 
+        // Last and most important: what the picked artists actually made. Without it a 100:0 mix
+        // is whatever handful of their tracks the radios happened to include.
+        for (seed in setup.seeds) {
+            for (ref in runCatching { seedCatalogue(seed) }.getOrDefault(emptyList())) {
+                offer(ref, fromSeeds)
+            }
+        }
+
         // One step out, only when the picks' own radios did not bring enough back with them: every
         // hop is another request before the first track plays.
-        if (fromSeeds.size + fromOthers.size < count && radio.isNotEmpty()) {
+        if (fromSeeds.size < count * setup.selectedShare && radio.isNotEmpty()) {
             for (seedTrack in radio.filter { it.artistKey in seedKeys }.take(SECOND_HOP_SEEDS)) {
                 for (next in runCatching { relatedTo(seedTrack) }.getOrDefault(emptyList())) {
                     offer(next, if (next.artistKey in seedKeys) fromSeeds else fromOthers)
@@ -83,32 +98,32 @@ class RadioBuilder(
         return blend(
             selected = engine.rank(selected, cur, selected.size, selectedProfile),
             others = engine.rank(others, cur, others.size, otherProfile),
-            variety = setup.variety,
+            selectedShare = setup.selectedShare,
             count = count,
         )
     }
 
     /**
-     * Interleaves the two halves at the share [variety] asks for.
+     * Interleaves the two halves at the share the slider asks for.
      *
      * A target rather than a fixed pattern: at each slot it asks how many picked-artist tracks the
-     * mix should hold by now and takes one of those if it is behind. That gives 0 and 1 their exact
-     * meanings at the ends of the slider and an even spread everywhere else, and it never leaves a
-     * run of one kind because the other ran out early.
+     * mix should hold by now and takes one of those if it is behind. That makes every stop land on
+     * its own ratio exactly — 100:0 really is all picks — and spreads the difference evenly through
+     * the queue instead of leaving a run of one kind at the end.
      */
     private fun blend(
         selected: List<TrackRef>,
         others: List<TrackRef>,
-        variety: Float,
+        selectedShare: Float,
         count: Int,
     ): List<TrackRef> {
-        val selectedShare = 1.0 - variety.coerceIn(0f, 1f)
+        val share = selectedShare.coerceIn(0f, 1f)
         val out = ArrayList<TrackRef>(count)
         var fromSelected = 0
         var fromOthers = 0
 
         for (slot in 0 until count) {
-            val wanted = ((slot + 1) * selectedShare).roundToInt()
+            val wanted = ((slot + 1) * share).roundToInt()
 
             val takeSelected = when {
                 fromSelected < selected.size && fromOthers < others.size -> fromSelected < wanted

@@ -15,14 +15,14 @@ data class SavedRadio(
     val id: String,
     val name: String,
     val seeds: List<RadioSeed>,
-    val variety: Float = RadioSetup.DEFAULT_VARIETY,
+    val stop: Int = RadioSetup.DEFAULT_STOP,
     val familiarOnly: Boolean = false,
     val createdAt: Long = 0L,
 ) {
     val isReady: Boolean get() = seeds.isNotEmpty()
 
     /** The same radio as an editable draft. */
-    fun toDraft(): RadioSetup = RadioSetup(seeds = seeds, variety = variety, familiarOnly = familiarOnly)
+    fun toDraft(): RadioSetup = RadioSetup(seeds = seeds, stop = stop, familiarOnly = familiarOnly)
 }
 
 /**
