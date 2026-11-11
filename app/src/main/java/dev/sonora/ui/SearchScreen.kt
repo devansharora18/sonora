@@ -265,7 +265,13 @@ fun SearchScreen(
 
         SearchField(
             query = query,
-            onQueryChange = { query = it },
+            onQueryChange = { typed ->
+                query = typed
+                // Emptying the box is a request to go back, not just to stop typing: with the field
+                // no longer keyed on the committed query, the old rows would otherwise sit under an
+                // empty box with no way back to the recent searches.
+                if (typed.isBlank() && searchState.query.isNotBlank()) SonoraBackend.clearSearch()
+            },
             onSubmit = { SonoraBackend.search(context, query.trim()) },
             onFocusChange = { fieldFocused = it },
         )
@@ -280,7 +286,23 @@ fun SearchScreen(
                 ChoicePill(
                     label = "Soulseek",
                     selected = selectedTab == SearchSource.SOULSEEK,
-                    onClick = { selectedTab = SearchSource.SOULSEEK },
+                    onClick = {
+                        selectedTab = SearchSource.SOULSEEK
+                        // The catalogue has been answering while the listener typed; the peers have
+                        // not been asked yet, and a tab that opens onto "nothing on the network"
+                        // under a query already typed reads as a broken search.
+                        val term = query.trim()
+                        if (term.length >= LIVE_SEARCH_MIN_CHARS &&
+                            searchState.query == term
+                        ) {
+                            SonoraBackend.searchPeers(
+                                context,
+                                term,
+                                record = false,
+                                youtubeLoading = false,
+                            )
+                        }
+                    },
                 )
             }
         }

@@ -1522,6 +1522,11 @@ object SonoraBackend {
         val term = query.trim()
         if (term.isEmpty()) return false
 
+        // When the catalogue is already answering this term and the caller is only adding peers,
+        // its rows are kept: the tab that shows them is still on screen and asking again would
+        // blank it for the length of a second request.
+        val catalogue = _search.value.takeIf { it.query == term && !youtubeLoading }
+
         val current = session
         if (current == null) {
             // Nothing to ask the network, so the catalogue answers on its own. A search that
@@ -1530,6 +1535,8 @@ object SonoraBackend {
                 query = term,
                 searching = false,
                 youtubeLoading = youtubeLoading,
+                youtube = catalogue?.youtube.orEmpty(),
+                entities = catalogue?.entities ?: YtmCatalog(),
             )
             return false
         }
@@ -1543,6 +1550,8 @@ object SonoraBackend {
             query = term,
             searching = true,
             youtubeLoading = youtubeLoading,
+            youtube = catalogue?.youtube.orEmpty(),
+            entities = catalogue?.entities ?: YtmCatalog(),
         )
         Log.d(TAG, "searching peers: $term")
 
