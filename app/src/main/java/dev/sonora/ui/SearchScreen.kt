@@ -428,7 +428,9 @@ fun SearchScreen(
                     item(key = "artists") {
                         EntityShelf(
                             title = "Artists",
-                            subtitle = "From YouTube Music; tap to open",
+                            // No source line: the pills above already say YouTube Music, and saying
+                            // it again under every heading turns a label into a disclaimer.
+                            subtitle = "Artists in the catalogue",
                             entities = entities.artists,
                             onOpen = onOpenArtist,
                         )
@@ -439,7 +441,7 @@ fun SearchScreen(
                     item(key = "albums") {
                         EntityShelf(
                             title = "Albums",
-                            subtitle = "From YouTube Music; tap to open",
+                            subtitle = "Releases in the catalogue",
                             entities = entities.albums,
                             onOpen = onOpenAlbum,
                         )

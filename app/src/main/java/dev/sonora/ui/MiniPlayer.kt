@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,6 +28,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,6 +49,7 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
 import dev.sonora.backend.LibraryTrack
+import dev.sonora.backend.SonoraPlayer
 import dev.sonora.ui.theme.accentText
 
 /**
@@ -95,6 +98,9 @@ private val ROW_PADDING_HORIZONTAL = 12.dp
 
 /** The artwork's corner, on the same 8dp every other thumbnail in the app carries. */
 private val ART_CORNER = 8.dp
+
+/** The progress line's thickness. */
+private val PROGRESS_HEIGHT = 2.dp
 
 /** Distance that makes a horizontal drag an intentional track change. */
 private val TRACK_SWIPE_THRESHOLD = 72.dp
@@ -161,6 +167,12 @@ internal fun MiniPlayer(
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(percent = 50)
+    val progress by SonoraPlayer.progress.collectAsState()
+    val played = if (progress.durationMs > 0L) {
+        (progress.positionMs.toFloat() / progress.durationMs).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
 
     Box(
         modifier = modifier
@@ -264,6 +276,26 @@ internal fun MiniPlayer(
                     modifier = Modifier.size(SKIP_GLYPH_SIZE),
                 )
             }
+        }
+
+        // How far through the track, at the pill's own bottom edge. Without it the bar says what is
+        // playing and how long it is but not where in it you are, and the only place to find that
+        // out is the full player.
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp, vertical = 4.dp)
+                .height(PROGRESS_HEIGHT)
+                .clip(RoundedCornerShape(percent = 50))
+                .background(MaterialTheme.colorScheme.onBackground.copy(alpha = 0.14f)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(played)
+                    .height(PROGRESS_HEIGHT)
+                    .background(MaterialTheme.colorScheme.accentText),
+            )
         }
     }
 }
