@@ -73,6 +73,7 @@ import dev.sonora.backend.SonoraPlayer
 import dev.sonora.backend.SearchSource
 import dev.sonora.backend.SearchState
 import dev.sonora.backend.toYtm
+import kotlinx.coroutines.delay
 import dev.sonora.backend.BackendState
 import dev.sonora.backend.SonoraBackend
 import dev.sonora.backend.SortMode
@@ -112,9 +113,17 @@ fun SearchScreen(
     }
     val sources by SonoraBackend.searchSources.collectAsState()
 
-    // Keyed on the committed query so clearing the search clears the box with it, rather than
-    // leaving stale text above an empty result list.
-    var query by remember(searchState.query) { mutableStateOf(searchState.query) }
+    // The box is the listener's while they are typing, and the committed query otherwise. It used
+    // to be keyed on the committed query, which was fine when a search only happened on submit;
+    // with results arriving per pause in typing, re-keying it would rewrite the field under the
+    // finger — a trailing space disappearing mid-word is the visible version of that.
+    var query by remember { mutableStateOf(searchState.query) }
+    var fieldFocused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(searchState.query, fieldFocused) {
+        if (!fieldFocused) query = searchState.query
+    }
+
     fun runSearch(term: String) {
         query = term
         if (term.isNotBlank()) SonoraBackend.search(context, term.trim())
@@ -133,7 +142,6 @@ fun SearchScreen(
     // recent queries the moment the field is touched, because that is the moment the listener has
     // decided they are going to type something — and a page of coloured categories under a field
     // they are reaching for is in the way of the thing they came to do.
-    var fieldFocused by remember { mutableStateOf(false) }
     val showingShelves = showingHistory && !fieldFocused
 
     // What has been played out of a search, so the page can offer the answer rather than the
@@ -144,6 +152,21 @@ fun SearchScreen(
 
     var selectedTab by remember { mutableStateOf(SearchSource.YOUTUBE_MUSIC) }
     val showSoulseek = selectedTab == SearchSource.SOULSEEK
+
+    // Results as the listener types. Restarting this coroutine on every keystroke *is* the
+    // debounce: the delay only runs once typing has stopped. The backend drops anything that
+    // arrives for a query the listener has already moved on from, so a slow answer cannot land
+    // under a newer word.
+    LaunchedEffect(query, selectedTab) {
+        val term = query.trim()
+        if (term.length < LIVE_SEARCH_MIN_CHARS) return@LaunchedEffect
+        if (term == SonoraBackend.search.value.query) return@LaunchedEffect
+
+        delay(LIVE_SEARCH_DEBOUNCE_MS)
+        // The peer network is asked only when its own tab is showing: a broadcast search is not
+        // something to send once per pause in typing while the listener is reading YouTube rows.
+        SonoraBackend.searchWhileTyping(context, term, peers = selectedTab == SearchSource.SOULSEEK)
+    }
     val showYoutube = selectedTab == SearchSource.YOUTUBE_MUSIC
 
     // The top result's second button, and the flow it opens. Held here rather than inside the
@@ -890,3 +913,9 @@ private fun SoulseekEmpty(query: String, connected: Boolean, onSignIn: () -> Uni
         }
     }
 }
+
+/** How long typing has to stop before the page asks again. */
+private const val LIVE_SEARCH_DEBOUNCE_MS = 350L
+
+/** The fewest characters worth asking about; the same threshold the backend holds. */
+private const val LIVE_SEARCH_MIN_CHARS = 2
