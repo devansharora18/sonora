@@ -19,6 +19,17 @@ filled it with neighbours instead. `RadioArtistDirectory.tracksFor` now keeps th
 whole track list and `RadioBuilder` takes `seedCatalogue` from it. Without this the slider's left
 half was a promise the pool could not keep.
 
+**A track credited to a collaborator belongs to the picks half, and only there.** An artist's page
+lists collaborations under the other artist's name first, so the same track can arrive through the
+radio as an outsider and through the catalogue as a pick. Where it is added second, it is removed
+from the other half — `blend` draws from the two lists independently and would otherwise queue the
+same song twice.
+
+**The peer tab is not re-asked for a term it already answered.** Tapping Soulseek with results
+already on screen used to rebuild the search state from scratch: the rows vanished, the sort reset
+and the query went out to the network a second time. The pill only asks when the peers have said
+nothing yet.
+
 **The picker dedupes by artist id before it draws.** Two search results whose names fold together
 ("Passenger", six times over) were two list items with one key, which is an immediate crash. Rows
 are keyed by browse id, and the list is deduped by it first.
