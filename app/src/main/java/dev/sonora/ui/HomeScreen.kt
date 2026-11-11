@@ -47,7 +47,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.layout.BoxWithConstraints
 import dev.sonora.backend.asLibraryTrack
 import dev.sonora.backend.DownloadState
 import dev.sonora.backend.LibraryGrouping
@@ -268,42 +267,26 @@ private fun RecentlyPlayedRow(tracks: List<LibraryTrack>) {
     Column(modifier = Modifier.padding(bottom = 26.dp)) {
         ShelfHeader(title = "Recently played", subtitle = "Pick up where you left off")
 
-        // Rows rather than cards, paged sideways in columns. Recents is the one shelf where the
-        // question is "what was that one called" rather than "what should I play", and a list of
-        // titles answers it where a wall of covers does not. Four to a column so the next page is
-        // visible without paging.
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val columnWidth = trackColumnWidth(maxWidth)
-
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                itemsIndexed(
-                    tracks.chunked(RECENT_TRACKS_PER_COLUMN),
-                    key = { _, page -> page.firstOrNull()?.key ?: "empty" },
-                ) { _, page ->
-                    Column(Modifier.width(columnWidth)) {
-                        page.forEach { track ->
-                            val index = tracks.indexOf(track)
-                            SongRow(
-                                track = track,
-                                // The whole recents list becomes the queue, so next and previous
-                                // carry on down it rather than stopping at the tapped track.
-                                onClick = { SonoraPlayer.play(context, tracks, index) },
-                                isCurrent = false,
-                                meta = listOfNotNull(track.artist).joinToString("  \u00b7  "),
-                            )
-                        }
-                    }
-                }
-            }
+        // Rows, stacked. They were paged sideways in columns so four fit where eight would not,
+        // but a column that is narrower than the viewport leaves a strip of the next column's
+        // artwork showing at the right edge with no text under it — which reads as a rendering
+        // fault, not as "there is more". A short list that is honest about being short is better.
+        tracks.take(RECENT_TRACKS_VISIBLE).forEachIndexed { index, track ->
+            SongRow(
+                track = track,
+                // The whole recents list becomes the queue, so next and previous carry on down it
+                // rather than stopping at the tapped track.
+                onClick = { SonoraPlayer.play(context, tracks, tracks.indexOf(track)) },
+                isCurrent = false,
+                meta = listOfNotNull(track.artist).joinToString("  \u00b7  "),
+                divider = index < tracks.take(RECENT_TRACKS_VISIBLE).lastIndex,
+            )
         }
     }
 }
 
-/** How many track rows make a page of the recents shelf. */
-private const val RECENT_TRACKS_PER_COLUMN = 4
+/** How many recent tracks the shelf shows before the Library takes over. */
+private const val RECENT_TRACKS_VISIBLE = 4
 
 @Composable
 private fun Section(
