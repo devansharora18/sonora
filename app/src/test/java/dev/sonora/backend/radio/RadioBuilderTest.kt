@@ -94,6 +94,44 @@ class RadioBuilderTest {
     }
 
     @Test
+    fun `the first stop is all picks even when the picks run out`() = runBlocking {
+        // Five tracks' worth of catalogue and nothing else: the mix is five long, not twenty with
+        // fifteen other artists filling it in. A stop is a promise about the whole queue.
+        val mix = builder(engine(), catalogue = { catalogue(5) }) { mixedRadio(own = 0, other = 30) }
+            .build(setup("Billie Eilish", stop = 0), library = emptyList(), count = 20)
+
+        assertEquals(5, mix.size)
+        assertTrue(mix.all { it.artist == "Billie Eilish" })
+    }
+
+    @Test
+    fun `the neighbourhood running out is filled from the picks, not with strangers`() = runBlocking {
+        val mix = builder(engine(), catalogue = { catalogue(30) }) { mixedRadio(own = 0, other = 2) }
+            .build(setup("Billie Eilish", stop = 1), library = emptyList(), count = 20)
+
+        assertEquals(20, mix.size)
+        val own = mix.count { it.artist == "Billie Eilish" }
+        assertTrue("expected at least sixteen picks, got $own", own >= 16)
+    }
+
+    @Test
+    fun `a refill never offers a track the radio already queued`() = runBlocking {
+        val first = builder(engine(), catalogue = { catalogue(20) }) { emptyList() }
+            .build(setup("Billie Eilish", stop = 0), library = emptyList(), count = 10)
+
+        val second = builder(engine(), catalogue = { catalogue(20) }) { emptyList() }
+            .build(
+                setup("Billie Eilish", stop = 0),
+                library = emptyList(),
+                count = 10,
+                exclude = first.mapTo(HashSet()) { it.key },
+            )
+
+        assertEquals(10, second.size)
+        assertTrue(first.map { it.key }.toSet().intersect(second.map { it.key }.toSet()).isEmpty())
+    }
+
+    @Test
     fun `a track credited to a collaborator is queued once`() = runBlocking {
         // An artist page lists collaborations credited to the other artist first, so the same
         // track arrives through the radio as an outsider and through the catalogue as a pick.

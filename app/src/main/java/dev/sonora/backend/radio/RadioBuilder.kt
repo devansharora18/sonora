@@ -47,6 +47,8 @@ class RadioBuilder(
         library: List<TrackRef>,
         cur: TrackRef? = null,
         count: Int = MIX_SIZE,
+        /** Tracks already queued or played by this radio, which a refill must not hand back. */
+        exclude: Set<String> = emptySet(),
     ): List<TrackRef> {
         if (!setup.isReady || count <= 0) return emptyList()
 
@@ -60,6 +62,7 @@ class RadioBuilder(
         val fromOthers = LinkedHashMap<String, TrackRef>()
 
         fun offer(ref: TrackRef, into: LinkedHashMap<String, TrackRef>) {
+            if (ref.key in exclude) return
             if (into[ref.key] == null) into[ref.key] = ref
         }
 
@@ -111,10 +114,15 @@ class RadioBuilder(
     /**
      * Interleaves the two halves at the share the slider asks for.
      *
-     * A target rather than a fixed pattern: at each slot it asks how many picked-artist tracks the
-     * mix should hold by now and takes one of those if it is behind. That makes every stop land on
-     * its own ratio exactly — 100:0 really is all picks — and spreads the difference evenly through
-     * the queue instead of leaving a run of one kind at the end.
+     * Each half is first cut to its own quota, so a stop is a promise about the *whole* queue and
+     * not a starting point: 100:0 is all picks, and a mix that runs out of them is shorter rather
+     * than quietly filled with other artists. The one direction top-up is allowed is towards the
+     * picks — when the neighbourhood cannot fill its 20%, more of what the listener asked for is
+     * not a broken promise.
+     *
+     * The interleave itself is target-driven: at each slot it asks how many picked-artist tracks
+     * the mix should hold by now and takes one if it is behind, which spreads the difference
+     * evenly instead of leaving one kind in a run at the end.
      */
     private fun blend(
         selected: List<TrackRef>,
@@ -123,6 +131,19 @@ class RadioBuilder(
         count: Int,
     ): List<TrackRef> {
         val share = selectedShare.coerceIn(0f, 1f)
+        val wantedSelected = (count * share).roundToInt()
+        val wantedOthers = count - wantedSelected
+
+        val pickedSelected = selected.take(wantedSelected)
+        val pickedOthers = others.take(wantedOthers)
+
+        // The neighbourhood ran out first: the picks may take the rest of the queue.
+        val picked = if (pickedOthers.size < wantedOthers) {
+            pickedSelected + selected.drop(pickedSelected.size).take(count - pickedSelected.size - pickedOthers.size)
+        } else {
+            pickedSelected
+        }
+
         val out = ArrayList<TrackRef>(count)
         var fromSelected = 0
         var fromOthers = 0
@@ -131,13 +152,13 @@ class RadioBuilder(
             val wanted = ((slot + 1) * share).roundToInt()
 
             val takeSelected = when {
-                fromSelected < selected.size && fromOthers < others.size -> fromSelected < wanted
-                fromSelected < selected.size -> true
-                fromOthers < others.size -> false
+                fromSelected < picked.size && fromOthers < pickedOthers.size -> fromSelected < wanted
+                fromSelected < picked.size -> true
+                fromOthers < pickedOthers.size -> false
                 else -> break
             }
 
-            out += if (takeSelected) selected[fromSelected++] else others[fromOthers++]
+            out += if (takeSelected) picked[fromSelected++] else pickedOthers[fromOthers++]
         }
 
         return out

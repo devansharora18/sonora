@@ -459,8 +459,27 @@ object SonoraBackend {
             // Only while the queue is still the mix. A track the listener started by hand means the
             // radio is over, and refilling with the mix would hijack their choice.
             if (cur == null || cur.key in activeRadioKeys) {
-                val more = buildRadio(context, radio, count)
-                if (more.isNotEmpty()) return more
+                var more = buildRadioRefs(context, radio, count, exclude = activeRadioKeys)
+
+                // The catalogue is finite and this radio has been through most of it. Topping the
+                // batch up from the whole pool keeps the queue from dribbling out one track at a
+                // time, and it keeps the promise the slider made: an endless queue of *these*
+                // artists. Falling through to Autoplay instead would quietly turn a 100:0 radio
+                // into a mix with strangers in it.
+                if (more.size < count && activeRadioKeys.isNotEmpty()) {
+                    val repeats = buildRadioRefs(
+                        context,
+                        radio,
+                        count - more.size,
+                        exclude = more.mapTo(HashSet()) { it.key },
+                    )
+                    more = more + repeats
+                }
+
+                if (more.isNotEmpty()) {
+                    activeRadioKeys = activeRadioKeys + more.map { it.key }
+                    return more.mapNotNull { it.toLibraryTrack() }
+                }
             }
             activeRadio = null
             activeRadioKeys = emptySet()
@@ -504,7 +523,14 @@ object SonoraBackend {
     /** What the playing queue is a mix of, for the player to name it. Null when it is not one. */
     val activeRadioLabel: StateFlow<String?> = _activeRadioLabel.asStateFlow()
 
-    /** What that mix queued, so a refill can tell whether the listener is still inside it. */
+    /**
+     * Every track this mix has queued, keyed the way [TrackRef] keys it.
+     *
+     * Ref keys, not player keys: the refill is handed a [TrackRef] and compares against this, and
+     * the two spellings of a track (`artist|title` versus `ytm:<id>`) never match. Getting that
+     * wrong is invisible until the first refill, at which point the mix is dropped and Autoplay
+     * carries on with other artists under the radio's name.
+     */
     @Volatile
     private var activeRadioKeys: Set<String> = emptySet()
 
@@ -669,31 +695,32 @@ object SonoraBackend {
     }
 
     private suspend fun startRadio(context: Context, setup: RadioSetup): List<LibraryTrack> {
-        val tracks = buildRadio(context, setup)
-        if (tracks.isNotEmpty()) {
-            activeRadio = setup
-            activeRadioKeys = tracks.mapTo(HashSet()) { it.key }
-            _activeRadioLabel.value =
-                (if (setup.familiarOnly) "Familiar · " else "Radio · ") +
-                setup.seeds.joinToString(", ") { it.name }
-        }
-        return tracks
+        val refs = buildRadioRefs(context, setup, RadioBuilder.MIX_SIZE, exclude = emptySet())
+        if (refs.isEmpty()) return emptyList()
+
+        activeRadio = setup
+        activeRadioKeys = refs.mapTo(HashSet()) { it.key }
+        _activeRadioLabel.value =
+            (if (setup.familiarOnly) "Familiar · " else "Radio · ") +
+            setup.seeds.joinToString(", ") { it.name }
+
+        return refs.mapNotNull { it.toLibraryTrack() }
     }
 
-    private suspend fun buildRadio(
+    private suspend fun buildRadioRefs(
         context: Context,
         setup: RadioSetup,
         count: Int = RadioBuilder.MIX_SIZE,
-    ): List<LibraryTrack> {
+        exclude: Set<String>,
+    ): List<TrackRef> {
         if (!setup.isReady) return emptyList()
 
         val builder = radioBuilder(context)
         val library = withContext(Dispatchers.Default) { _library.value.map { it.toTrackRef() } }
 
-        val refs = withContext(Dispatchers.Default) {
-            builder.build(setup = setup, library = library, count = count)
+        return withContext(Dispatchers.Default) {
+            builder.build(setup = setup, library = library, count = count, exclude = exclude)
         }
-        return refs.mapNotNull { it.toLibraryTrack() }
     }
 
     /** Wipes the learned model. */
