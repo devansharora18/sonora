@@ -292,8 +292,13 @@ fun SearchScreen(
                         // not been asked yet, and a tab that opens onto "nothing on the network"
                         // under a query already typed reads as a broken search.
                         val term = query.trim()
+                        // Only when the peers have not answered this term: a submitted search
+                        // already asked them, and asking again would wipe the rows on screen,
+                        // reset the sort and start another twenty-second broadcast.
+                        val peersSilent = searchState.hits.isEmpty() && !searchState.searching
                         if (term.length >= LIVE_SEARCH_MIN_CHARS &&
-                            searchState.query == term
+                            searchState.query == term &&
+                            peersSilent
                         ) {
                             SonoraBackend.searchPeers(
                                 context,
