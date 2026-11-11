@@ -1,7 +1,8 @@
 # Radio — PRD
 
-Status: draft · Owner: Devansh
-Companion to `docs/audit-2026-11-11.md`. Nothing here is built yet.
+Status: implemented · Owner: Devansh
+Companion to `docs/audit-2026-11-11.md`. Built in this branch; see `docs/DECISIONS.md` for the
+calls made while building it.
 
 ---
 
@@ -28,20 +29,27 @@ Home → Start a radio → pick artists → a mix.
 
 ## The feature
 
-One screen. Pick one to five artists, then choose one of three mixes built from that selection.
+One screen. Pick one to five artists, set one slider, play it, keep it.
 
-| Mix | What it plays | Pool | Filter |
-|---|---|---|---|
-| **Blended** | the picked artists, woven with what you already listen to | taste model + library + artist radios | none |
-| **Discover** | artists near the selection that you have not played | artist radios, two hops out | `plays == 0`, nothing in the library |
-| **Familiar only** | only music you have played, liked or downloaded | taste model + library | `plays > 0`, liked, or a local file |
+**Variety** is the whole control, and it is a proportion rather than a choice between named mixes:
+at 0 the mix is only the artists that were picked, at 1 it is almost entirely artists around them,
+and every value between is the share the slider says. The caption under it spells out where it
+currently sits, so the position is never the only explanation.
 
-The three differ in one variable — how much of the pool is new — which is what makes the choice
-legible: same seed artists, three answers to "how far out?".
+| Control | What it does |
+|---|---|
+| Artists | 1–5 seeds, added from the listening history or by searching the catalogue |
+| Variety | 0 = only the picked artists · 1 = almost all neighbours |
+| Familiar only | filters both sides to music played, liked or downloaded |
+| Save | keeps artists + variety + familiar flag as a radio on Home and in the Library |
 
-An artist picked in the UI is a **seed**: it supplies artists for the taste scoring, and it is the
-seed for a YouTube Music radio (`YtmRadio.related`), which is already the app's only source of
-music it does not already know about.
+A saved radio stores its **ingredients**, not its tracks. Playing one rebuilds the queue from the
+current catalogue and listening history; the mix therefore never goes stale, and two saved radios
+that share artists but differ in variety stay two different things.
+
+An artist picked in the UI is a **seed**: it supplies artists for the taste scoring, and it seeds a
+YouTube Music radio (`YtmRadio.related`), which is the app's only source of music it does not
+already know about.
 
 ## Scope
 
@@ -56,8 +64,8 @@ music it does not already know about.
 
 ## Non-goals
 
-- No radio from a playlist, an album or a song (only from artists) in v1. The three mixes are
-  defined by a set of artists; a playlist is a different seed shape.
+- No radio from a playlist, an album or a song (only from artists) in v1. A radio is defined by a set
+  of artists; a playlist is a different seed shape.
 - No continuous "infinite station" that mutates while playing. A mix is generated and refills with
   the same mode; it does not re-pick its artists.
 - No server-side personalisation and no account. Everything is local, like the taste model.
@@ -70,36 +78,43 @@ music it does not already know about.
 
 ```
 Home
- ├─ [Start a radio]  ← a card above "Recently added", only when a taste model or playlists exist
+ ├─ [Start a radio]          ← card, above the shelves
+ ├─ Your radios              ← saved mixes, one tap to play
  └─ …
       ↓
 Radio screen (full screen, back chevron)
- ├─ "Radio" heading, one line of explanation
- ├─ Artist chips: picked artists, × to remove, "+ Add artist"
- ├─ [Add artist] → search field + suggestions (top taste artists, then YouTube artists)
- └─ Three mix cards, each with a one-line description and a Play button:
-      Blended · Discover · Familiar only
+ ├─ Artists: picked chips, × to remove, "+ Add another"
+ ├─ Variety: slider (0…1, five stops) + end labels + a live caption
+ ├─ Familiar only: switch
+ ├─ [Play mix]  [Save]
+ └─ Saved radios: tap to retune, play disc to start, × to delete
 ```
+
+The Library's Radios section lists the same saved radios: the row retunes, the disc plays.
 
 ## Data model
 
 ```
-RadioMode { BLENDED, DISCOVER, FAMILIAR }
-
 RadioSeed(            // one picked artist
   browseId: String?,  // YouTube artist id, null for an unresolved name
   name: String,
   artworkUrl: String?,
 )
 
-RadioSetup(           // persisted; SharedPreferences or the existing Playlists store
-  seeds: List<RadioSeed>,   // 0..5, order = the order the listener picked them
-  mode: RadioMode,          // last used, so reopening resumes on the same tab
+RadioSetup(           // the draft, persisted
+  seeds: List<RadioSeed>,   // 0..5, in pick order
+  variety: Float,           // 0..1, default 0.3
+  familiarOnly: Boolean,
 )
 
-RadioSession(         // in memory, belongs to the player
-  setup: RadioSetup,
-  builtAt: Long,
+SavedRadio(           // a kept radio
+  id: String, name: String,
+  seeds: List<RadioSeed>, variety: Float, familiarOnly: Boolean, createdAt: Long,
+)
+
+RadioState(           // radio.json
+  draft: RadioSetup,
+  saved: List<SavedRadio>,
 )
 ```
 
@@ -114,7 +129,7 @@ taking the first hit.
 `TasteEngine.next` currently does pool construction, filtering, scoring and sampling in one
 function. Radio needs the middle two with a different pool:
 
-1. **Extract `TasteEngine.rank(pool, cur, recent) → List<TrackRef>`** — the scoring + softmax half
+1. **`TasteEngine.rank(pool, cur, profile)`** — the scoring + softmax half
    of `next`, unchanged in behaviour. `next` keeps working by calling it. This is a
    behaviour-preserving refactor with the existing tests as the proof.
 2. **New `backend/radio/RadioBuilder.kt`** owns the pool per mode:
@@ -133,33 +148,30 @@ function. Radio needs the middle two with a different pool:
 4. **Seeding a radio for an artist** needs a video id. `YtmBrowse.page(artistId)` returns the
    artist's tracks; the first one seeds `YtmRadio.related`. Cached per artist for the session.
 
-## Steps
+## Build
 
-Each step is one commit and stops for review.
+Done in this branch, one commit each: the setup model and store · `TasteEngine.rank` extracted ·
+`RankProfile` · `RadioBuilder` pools · seeded-artist resolution · the Radio screen with the
+picker · the variety slider and Save · saved radios on Home and in the Library · refill that keeps
+the mix · the action-sheet entry.
 
-| # | Step | Size |
-|---|---|---|
-| 1 | `RadioMode`, `RadioSeed`, `RadioSetup`, persistence + round-trip test | small |
-| 2 | Extract `TasteEngine.rank`; existing tests stay green | small |
-| 3 | `RankProfile` + the three weight sets, tested on the JVM | small |
-| 4 | `RadioBuilder`: blend pool, tested against a fixture model | medium |
-| 5 | `RadioBuilder`: discover and familiar pools, tested | medium |
-| 6 | Artist seed resolution (name → entity, artist → video id), cached | medium |
-| 7 | Radio screen: picker + chips + empty state | medium |
-| 8 | Three mix cards, generate, play, show the name in the player | medium |
-| 9 | Refill on the same mode; Home card; action-sheet entry | medium |
-| 10 | Error and empty states: no results for a seed, pool too small, offline | small |
+The three named mixes were replaced by the variety slider after the first build; see
+`docs/DECISIONS.md`.
 
 ## Acceptance criteria
 
-- Given a fresh install with no history, when the listener picks three artists and taps **Blended**,
-  then at least ten tracks play and none is a repeat of the last forty played.
-- Given a taste model with plays, when they tap **Familiar only**, then every track in the queue has
+- Given a fresh install with no history, when the listener picks three artists and presses **Play
+  mix** with the slider at the middle, then at least ten tracks play and about half are the picks.
+- Given any selection, when the slider is at the far left, then every track in the queue is by a
+  picked artist.
+- Given any selection with neighbours available, when the slider is at the far right, then no track
+  in the queue is by a picked artist.
+- Given a taste model with plays, when **Familiar only** is on, then every track in the queue has
   been played, liked or downloaded before.
-- Given the same three artists, when they tap **Discover**, then no track in the queue is in their
-  library, and at most a third of it is by the picked artists.
-- Given a mix is playing, when it reaches the last five tracks, then it refills with the same mode
-  without changing what is already queued.
+- Given a mix is playing, when it reaches the last five tracks, then it refills with the same
+  variety without changing what is already queued.
+- Given a radio is saved, when Home or the Library is opened, then it is listed there, and playing
+  it from either is the same mix.
 - Given no network, when they tap a mix, then the screen says so and does not queue an empty player.
 - Given one picked artist whose radio returns nothing, when a mix is built, then the other seeds
   still fill the queue and the empty one is named.

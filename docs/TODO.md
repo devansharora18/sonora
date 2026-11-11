@@ -23,6 +23,20 @@ network available and once in airplane mode (cold start must fall back without c
 3. Confirm a downloaded lossless copy is preferred when one exists for a pick.
 4. Confirm what you queued by hand is never reordered or removed.
 
+### Radio
+
+1. Home → **Start a radio** → add two artists → confirm the picker lists your top artists first
+   with their real pictures (needs network; the suggestion lookup is one request per artist).
+2. Drag the variety slider to the far left, press **Play mix**, open the queue: every track should
+   be by a picked artist. Repeat at the far right: none should be.
+3. Press **Save**, then check Home's *Your radios* shelf and Library → *Radios*. Play from the
+   Library's disc; the queue header should read `Radio · <artists>`.
+4. Tap the saved radio's row: its artists and variety should come back into the Radio screen.
+5. With **Familiar only** on and a small history, the mix may be shorter than forty tracks — that is
+   the filter working, not a failure.
+6. Airplane mode: pressing **Play mix** should show "Could not build that mix" and leave the queue
+   untouched.
+
 ### Persistence across process death
 
 1. Play a few tracks, then swipe the app away.

@@ -58,8 +58,14 @@ what stops a liked song from failing to appear in Liked Songs.
   shuffle, repeat, and a real media notification with the cover and transport controls.
 - **Lyrics** — time-synced, with the sung part swept across the line, the surrounding lines falling
   away, and a tap to browse them instead of following.
+- **Radio** — pick up to five artists, then set one slider for how far the mix roams: at the left it
+  is only those artists, at the right it is the music around them. Save a radio and it appears on
+  Home and in the Library, one tap from playing and one tap from being retuned. A saved radio is
+  its artists, its variety and whether it may play anything you have not heard — so it never goes
+  stale, and a mix is rebuilt each time rather than replayed.
 - **Infinite autoplay** — the queue does not run out; when it gets near the end it tops itself up
-  from the artist you are listening to, and keeps going.
+  from the artist you are listening to, and keeps going. A queue that came from a radio keeps the
+  radio's reach when it refills.
 - **On-device taste** — it learns what you finish, skip, like and what plays after what, and keeps
   that model on the phone. Autoplay refills from it and from YouTube Music's radio, preferring a
   lossless copy you already have. Export or import it, or erase it, from Settings → Taste.
