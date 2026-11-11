@@ -378,6 +378,9 @@ private fun MainTabs(state: BackendState) {
         // artist line on the player. Held apart from the two names above because a name alone
         // cannot fetch an artist's songs, and following one is for the songs.
         var openPage by remember { mutableStateOf<PageRequest?>(null) }
+        // Which tab a page opened from somewhere other than the Library should give the listener
+        // back to. Null when the Library opened it, because then the Library is already correct.
+        var pageReturnTab by remember { mutableStateOf<MainTab?>(null) }
     // Shelf navigation stacks scoped to each tab so sub-pages never bleed into or block other tabs.
     val homePages = remember { mutableStateListOf<ShelfPage>() }
     val searchPages = remember { mutableStateListOf<ShelfPage>() }
@@ -474,6 +477,7 @@ private fun MainTabs(state: BackendState) {
                                 artist = entity.subtitle,
                                 artworkUrl = entity.artworkUrl,
                             )
+                            pageReturnTab = MainTab.Search
                             tab = MainTab.Library
                         },
                         onOpenArtist = { entity ->
@@ -482,6 +486,7 @@ private fun MainTabs(state: BackendState) {
                                 browseId = entity.browseId,
                                 kind = PageKind.ARTIST,
                             )
+                            pageReturnTab = MainTab.Search
                             tab = MainTab.Library
                         },
                     )
@@ -500,7 +505,11 @@ private fun MainTabs(state: BackendState) {
                     openAlbumName = openAlbumName,
                     onCloseAlbum = { openAlbumName = null },
                     openPage = openPage,
-                    onClosePage = { openPage = null },
+                    onClosePage = {
+                        openPage = null
+                        pageReturnTab?.let { tab = it }
+                        pageReturnTab = null
+                    },
                     onNeedPeers = { tab = MainTab.Network },
                     onStartRadio = { artist ->
                         // A radio from one track is a radio from its artist: the mix is built from
