@@ -37,6 +37,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -55,6 +56,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Spacer
@@ -71,6 +73,7 @@ import dev.sonora.backend.SonoraPlayer
 import dev.sonora.backend.SearchSource
 import dev.sonora.backend.SearchState
 import dev.sonora.backend.toYtm
+import dev.sonora.backend.BackendState
 import dev.sonora.backend.SonoraBackend
 import dev.sonora.backend.SortMode
 import dev.sonora.ui.theme.accentText
@@ -136,6 +139,8 @@ fun SearchScreen(
     // What has been played out of a search, so the page can offer the answer rather than the
     // question. Read here rather than remembered so it survives leaving the tab.
     val recentTracks by SonoraBackend.recentTracks.collectAsState()
+
+    val backendState by SonoraBackend.state.collectAsState()
 
     var selectedTab by remember { mutableStateOf(SearchSource.YOUTUBE_MUSIC) }
     val showSoulseek = selectedTab == SearchSource.SOULSEEK
@@ -489,6 +494,18 @@ fun SearchScreen(
                 }
 
                 if (showSoulseek) {
+                    // An empty page is indistinguishable from a broken one. The network answering
+                    // with nothing and the network never having been set up are two different
+                    // states, and each has a different thing to do about it.
+                    if (searchState.hits.isEmpty() && !searchState.searching) {
+                        item(key = "soulseek-empty") {
+                            SoulseekEmpty(
+                                query = query.trim(),
+                                connected = backendState is BackendState.Connected,
+                                onSignIn = onNeedPeers,
+                            )
+                        }
+                    }
                     if (searchState.hits.isNotEmpty()) {
                         item(key = "soulseek-instruction") {
                             Text(
@@ -828,4 +845,46 @@ private fun quality(hit: SearchHit): String {
     }
 
     return parts.joinToString(" ")
+}
+
+/**
+ * What the peer network is doing when it has no rows to show.
+ *
+ * Two states, not one: not signed in is a setup question with an answer, and signed in with no
+ * hits is a search that found nothing. Showing the same blank page for both is what made this
+ * screen look broken.
+ */
+@Composable
+private fun SoulseekEmpty(query: String, connected: Boolean, onSignIn: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = PAGE_GUTTER, vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = if (connected) "Nothing on the network" else "Sign in to search the network",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+            textAlign = TextAlign.Center,
+        )
+        Text(
+            text = if (connected) {
+                if (query.isEmpty()) {
+                    "Search for a song and the network's files show up here."
+                } else {
+                    "No peer had “$query”. Try a different spelling, or search the catalogue."
+                }
+            } else {
+                "Soulseek is where the lossless files are. Searching and streaming work without it."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        if (!connected) {
+            Button(onClick = onSignIn) { Text("Sign in") }
+        }
+    }
 }
