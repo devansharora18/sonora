@@ -8,10 +8,17 @@ import android.provider.DocumentsContract
 import android.util.Log
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import dev.sonora.backend.radio.RadioArtistDirectory
+import dev.sonora.backend.radio.RadioBuilder
+import dev.sonora.backend.radio.RadioMode
+import dev.sonora.backend.radio.RadioSeed
+import dev.sonora.backend.radio.RadioSetup
+import dev.sonora.backend.radio.RadioStore
 import dev.sonora.backend.taste.Origin
 import dev.sonora.backend.taste.TasteEngine
 import dev.sonora.backend.taste.TasteModel
 import dev.sonora.backend.taste.TasteStore
+import dev.sonora.backend.taste.TasteSummary
 import dev.sonora.backend.taste.TasteTransfer
 import dev.sonora.backend.taste.TrackRef
 import dev.sonora.backend.taste.toLibraryTrack
@@ -90,6 +97,10 @@ object SonoraBackend {
     private const val SEARCH_HISTORY_FILE = "searches.json"
     private const val PLAY_HISTORY_FILE = "plays.json"
     private const val TASTE_FILE = "taste.json"
+    private const val RADIO_FILE = "radio.json"
+
+    /** How many of the model's strongest artists the picker offers before a search. */
+    private const val SUGGESTED_SEEDS = 8
 
     /** Synthetic plays from an import are spaced this far apart so no edge can form. */
     private const val SEED_SPACING_MS = 60L * 60L * 1000L
@@ -437,6 +448,20 @@ object SonoraBackend {
      * local lossless file behind it is preferred there, so this never has to choose.
      */
     suspend fun autoplayNext(context: Context, cur: TrackRef?, count: Int): List<LibraryTrack> {
+        // A queue that came from a mix keeps its mode when it runs low, which is what stops a
+        // Discover mix turning into Autoplay four tracks after it starts.
+        val radio = activeRadio
+        if (radio != null) {
+            // Only while the queue is still the mix. A track the listener started by hand means the
+            // radio is over, and refilling with the mix would hijack their choice.
+            if (cur == null || cur.key in activeRadioKeys) {
+                val more = buildRadio(context, radio, count)
+                if (more.isNotEmpty()) return more
+            }
+            activeRadio = null
+            activeRadioKeys = emptySet()
+        }
+
         val engine = taste(context)
         // Scoring walks the model; the radio call inside `next` is non-blocking, so the whole pick
         // runs off the main thread and the refill never competes with a frame.
@@ -445,6 +470,147 @@ object SonoraBackend {
                 val videoId = seed?.ytmId ?: cur?.ytmId ?: return@next emptyList()
                 YtmRadio.related(videoId).map { it.toTrackRef() }
             }
+        }
+        return refs.mapNotNull { it.toLibraryTrack() }
+    }
+
+    // ---- Radio --------------------------------------------------------------------------------
+
+    @Volatile
+    private var radioStore: RadioStore? = null
+
+    @Volatile
+    private var radioDirectory: RadioArtistDirectory? = null
+
+    @Volatile
+    private var radioBuilder: RadioBuilder? = null
+
+    private val _radio = MutableStateFlow(RadioSetup())
+
+    /** The picked artists and the mix last chosen. */
+    val radio: StateFlow<RadioSetup> = _radio.asStateFlow()
+
+    /** The mix a refill continues. Null once the queue is no longer the mix's. */
+    @Volatile
+    private var activeRadio: RadioSetup? = null
+
+    /** What that mix queued, so a refill can tell whether the listener is still inside it. */
+    @Volatile
+    private var activeRadioKeys: Set<String> = emptySet()
+
+    private fun radioStore(context: Context): RadioStore = radioStore ?: synchronized(this) {
+        radioStore ?: RadioStore(File(context.filesDir, RADIO_FILE)).also { radioStore = it }
+    }
+
+    private fun radioDirectory(context: Context): RadioArtistDirectory =
+        radioDirectory ?: synchronized(this) {
+            radioDirectory ?: RadioArtistDirectory().also { radioDirectory = it }
+        }
+
+    /**
+     * The builder, wired to the two network sources.
+     *
+     * Built once per process: the directory it holds caches every artist it has resolved, and a
+     * refill that rebuilt it would pay for the same lookups again.
+     */
+    private fun radioBuilder(context: Context): RadioBuilder = radioBuilder ?: synchronized(this) {
+        radioBuilder ?: run {
+            val directory = radioDirectory(context)
+            RadioBuilder(
+                engine = taste(context),
+                seedRadio = { seed ->
+                    val videoId = directory.trackFor(seed)
+                    if (videoId == null) {
+                        emptyList()
+                    } else {
+                        YtmRadio.related(videoId).map { it.toTrackRef() }
+                    }
+                },
+                relatedTo = { ref ->
+                    val videoId = ref.ytmId
+                    if (videoId == null) {
+                        emptyList()
+                    } else {
+                        YtmRadio.related(videoId).map { it.toTrackRef() }
+                    }
+                },
+            ).also { radioBuilder = it }
+        }
+    }
+
+    /** Reads the picked artists off disk and publishes them. */
+    fun refreshRadio(context: Context) {
+        scope.launch(Dispatchers.IO) { _radio.value = radioStore(context).load() }
+    }
+
+    fun addRadioSeed(context: Context, seed: RadioSeed) =
+        persistRadio(context, _radio.value.withSeed(seed))
+
+    fun removeRadioSeed(context: Context, name: String) =
+        persistRadio(context, _radio.value.withoutSeed(name))
+
+    fun setRadioMode(context: Context, mode: RadioMode) =
+        persistRadio(context, _radio.value.copy(mode = mode))
+
+    private fun persistRadio(context: Context, setup: RadioSetup) {
+        _radio.value = setup
+        scope.launch(Dispatchers.IO) { radioStore(context).save(setup) }
+    }
+
+    /**
+     * Artists worth offering before anyone searches: the strongest ones the model knows.
+     *
+     * Resolved to their YouTube pages so a suggestion can be added with one tap and no second
+     * request later. A name the catalogue does not know is dropped rather than shown as a pick that
+     * would build nothing.
+     */
+    suspend fun radioSuggestions(context: Context, limit: Int = SUGGESTED_SEEDS): List<RadioSeed> {
+        val model = taste(context).snapshot()
+        val names = withContext(Dispatchers.Default) {
+            TasteSummary.of(model, limit = limit).artists.map { it.name }
+        }
+        val directory = radioDirectory(context)
+        return names.mapNotNull { runCatching { directory.resolve(it) }.getOrNull() }
+    }
+
+    /** Artist search for the picker. */
+    suspend fun searchRadioArtists(context: Context, query: String): List<RadioSeed> {
+        if (query.isBlank()) return emptyList()
+
+        val found = runCatching { YtmCatalogSearch.artists(query) }.getOrDefault(emptyList())
+        return found.map { RadioSeed(it.title, it.browseId, it.artworkUrl) }
+    }
+
+    /**
+     * Builds the mix for [mode] and returns it ready to queue.
+     *
+     * Empty when nothing could be built — no artists picked, no network, or every seed silent —
+     * which is the screen's cue to say so rather than start an empty player.
+     */
+    suspend fun startRadio(context: Context, mode: RadioMode): List<LibraryTrack> {
+        val setup = _radio.value.copy(mode = mode)
+        persistRadio(context, setup)
+
+        val tracks = buildRadio(context, setup)
+        if (tracks.isNotEmpty()) {
+            activeRadio = setup
+            activeRadioKeys = tracks.mapTo(HashSet()) { it.key }
+        }
+        return tracks
+    }
+
+    private suspend fun buildRadio(
+        context: Context,
+        setup: RadioSetup,
+        count: Int = RadioBuilder.MIX_SIZE,
+    ): List<LibraryTrack> {
+        if (!setup.isReady) return emptyList()
+
+        val builder = radioBuilder(context)
+        val library = withContext(Dispatchers.Default) { _library.value.map { it.toTrackRef() } }
+
+        val refs = withContext(Dispatchers.Default) {
+            builder.build(setup = setup, mode = setup.mode, library = library, count = count)
         }
         return refs.mapNotNull { it.toLibraryTrack() }
     }
