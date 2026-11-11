@@ -49,6 +49,20 @@ going back to; merging them would make the slider unkeepable.
 five; a sixth leaves about 50dp per tab at 360dp and the longer labels start to ellipsize. Home
 carries a "Start a radio" card and a "Your radios" shelf; the Library carries a Radios section.
 
+**A refill keeps the mix's rule, its artists, and its pace.** Three things had to be true for an
+endless radio to stay honest. The set of what the mix has queued is keyed the way `TrackRef` keys
+it, because the refill is handed a `TrackRef` and the player's keys (`ytm:<id>`) never match it —
+that mismatch dropped the radio on the very first refill and let Autoplay carry on with other
+artists under the radio's name. The set grows with every refill, so a refill never hands back
+something already queued. And when a finite catalogue runs low the batch is topped up from the
+whole pool rather than dribbled out one track at a time: repeating these artists is what an endless
+radio of them means, and it beats handing the queue to Autoplay.
+
+**A stop is a quota, not a starting point.** Each half of the mix is cut to its own share before
+the two are interleaved, so 100:0 is all picks and a mix that runs out of them is shorter rather
+than padded with other artists. The only top-up allowed is towards the picks, when the
+neighbourhood cannot fill its share.
+
 **A refill only continues a mix while the queue is still that mix.** `activeRadioKeys` records what
 the mix queued; if the playing track is not one of them, the listener started something else by hand
 and the refill falls back to Autoplay instead of hijacking their choice.
