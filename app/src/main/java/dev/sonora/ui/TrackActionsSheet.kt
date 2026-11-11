@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.rounded.Radio
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PlaylistAdd
@@ -224,6 +225,7 @@ internal fun TrackActionsSheet(
     onAddToQueue: (() -> Unit)? = null,
     onOpenAlbum: (() -> Unit)? = null,
     onOpenArtist: (() -> Unit)? = null,
+    onStartRadio: (() -> Unit)? = null,
 ) {
     SonoraSheet(onDismiss = onDismiss) {
         Column(
@@ -290,6 +292,13 @@ internal fun TrackActionsSheet(
                     icon = Icons.Filled.Person,
                     label = "Open artist",
                     onClick = open,
+                )
+            }
+            onStartRadio?.let { radio ->
+                ActionRow(
+                    icon = Icons.Rounded.Radio,
+                    label = "Start a radio",
+                    onClick = radio,
                 )
             }
 

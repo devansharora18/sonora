@@ -100,6 +100,7 @@ fun LibraryScreen(
     onClosePage: () -> Unit = {},
     /** Sends the listener to the sign-in page. Held here because this is the screen that asks. */
     onNeedPeers: () -> Unit = {},
+    onStartRadio: (String) -> Unit = {},
 ) {
     // Somewhere to send the listener when a file was wanted and there was no network to ask.
     var needPeers by remember { mutableStateOf(false) }
@@ -319,6 +320,7 @@ fun LibraryScreen(
                     onOpenAlbum = { albumName = it },
                     onOpenArtist = { artistName = it },
                     onNeedPeers = { needPeers = true },
+                    onStartRadio = onStartRadio,
                     scanning = SonoraBackend.scanning.collectAsState().value,
                 )
 
@@ -442,6 +444,7 @@ private fun TracksSection(
     onOpenAlbum: (String) -> Unit,
     onOpenArtist: (String) -> Unit,
     onNeedPeers: () -> Unit,
+    onStartRadio: (String) -> Unit,
     scanning: Boolean,
 ) {
     var pending by remember { mutableStateOf<TrackMenu?>(null) }
@@ -562,6 +565,12 @@ private fun TracksSection(
                 {
                     pending = null
                     onOpenArtist(it)
+                }
+            },
+            onStartRadio = menu.track.artist?.takeIf { it.isNotBlank() }?.let {
+                {
+                    pending = null
+                    onStartRadio(it)
                 }
             },
         )

@@ -95,6 +95,7 @@ import dev.sonora.backend.PageRequest
 import dev.sonora.ytm.YtmCategory
 import dev.sonora.ytm.YtmPlaylistRef
 import dev.sonora.backend.PageKind
+import dev.sonora.backend.radio.RadioSeed
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.HazeState
 import androidx.compose.foundation.layout.width
@@ -501,6 +502,12 @@ private fun MainTabs(state: BackendState) {
                     openPage = openPage,
                     onClosePage = { openPage = null },
                     onNeedPeers = { tab = MainTab.Network },
+                    onStartRadio = { artist ->
+                        // A radio from one track is a radio from its artist: the mix is built from
+                        // artists, and the artist is the only part of the row that could seed one.
+                        SonoraBackend.addRadioSeed(context, RadioSeed(artist))
+                        radioOpen = true
+                    },
                 )
                 MainTab.Settings -> Box(
                     modifier = Modifier
