@@ -55,8 +55,6 @@ import dev.sonora.backend.LibraryTrack
 import dev.sonora.backend.Playlist
 import dev.sonora.backend.Playlists
 import dev.sonora.backend.SonoraBackend
-import dev.sonora.ytm.YtmCategory
-import dev.sonora.ytm.YtmPlaylistRef
 import dev.sonora.backend.SonoraPlayer
 import dev.sonora.ui.theme.accentText
 import java.io.File
@@ -73,8 +71,6 @@ fun HomeScreen(
     onRunSearch: (String) -> Unit,
     onOpenPlaylist: (String) -> Unit,
     onImportSpotify: () -> Unit = {},
-    onOpenShelfPlaylist: (YtmPlaylistRef) -> Unit = {},
-    onOpenCategory: (YtmCategory) -> Unit = {},
     onOpenRadio: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -118,13 +114,6 @@ fun HomeScreen(
     }
 
     val activeDownload = download as? DownloadState.Downloading
-
-    val shelves by SonoraBackend.shelves.collectAsState()
-    LaunchedEffect(Unit) { SonoraBackend.loadShelves() }
-    LaunchedEffect(shelves.categories) {
-        val first = shelves.categories.firstOrNull() ?: return@LaunchedEffect
-        if (shelves.chosen == null) SonoraBackend.loadCategory(first)
-    }
 
     // Whether there is anything of the listener's own. Decided once and used three times — the
     // heading, the row of downloads, and whether the shelves are the whole page — because a page
@@ -211,20 +200,6 @@ fun HomeScreen(
 
         if (history.isNotEmpty()) {
             item { RecentSearchesRow(history = history, onRunSearch = onRunSearch) }
-        }
-
-        // Last, and always. A page of the listener's own things is the point of this tab, and
-        // somewhere to hear something is the answer to a page of it when there is nothing yet — the
-        // same answer Search gives, because the same question is being asked of both.
-        item {
-            BrowseShelves(
-                shelves = shelves,
-                onChoose = { category ->
-                    SonoraBackend.loadCategory(category)
-                    onOpenCategory(category)
-                },
-                onOpen = { playlist -> onOpenShelfPlaylist(playlist) },
-            )
         }
     }
 }

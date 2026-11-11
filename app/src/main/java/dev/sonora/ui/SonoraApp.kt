@@ -440,8 +440,6 @@ private fun MainTabs(state: BackendState) {
                     HomeScreen(
                         onOpenRadio = { radioOpen = true },
                         onImportSpotify = { spotifyImport = true },
-                        onOpenShelfPlaylist = { homePages += ShelfPage.Playlist(it) },
-                        onOpenCategory = { homePages += ShelfPage.Category(it) },
                         onRunSearch = { term ->
                             // A suggestion on Home is really a pre-filled search, so this is
                             // the whole action: go to Search and run it.
