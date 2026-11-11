@@ -32,6 +32,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Autorenew
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.GraphicEq
@@ -71,6 +72,7 @@ import dev.sonora.backend.LibraryTrack
 import dev.sonora.backend.SonoraBackend
 import dev.sonora.backend.SonoraPlayer
 import dev.sonora.backend.UpNext
+import dev.sonora.ui.theme.accentText
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -111,6 +113,7 @@ internal fun QueuePanel(
     val context = LocalContext.current
     val settings by SonoraBackend.settings.collectAsState()
     val autoplayKeySet by SonoraPlayer.autoplayKeys.collectAsState()
+    val radioLabel by SonoraBackend.activeRadioLabel.collectAsState()
 
     val currentOffset = if (isAnimating) animOffsetY.value else dragOffsetY
 
@@ -240,7 +243,7 @@ internal fun QueuePanel(
 
                     if (following.isNotEmpty()) {
                         Text(
-                            text = "${following.size}",
+                            text = if (following.size == 1) "1 track" else "${following.size} tracks",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.SemiBold,
                             ),
@@ -253,20 +256,60 @@ internal fun QueuePanel(
                 }
             }
 
+            // A chip rather than a line of text: it is a control, and a sentence in the middle of
+            // a header reads as a caption. The fill is what says it is pressable, the colour is
+            // what says whether it is on.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 2.dp),
+                    .padding(horizontal = 20.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = { SonoraBackend.setAutoplay(context, !settings.autoplay) }) {
+                Row(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = if (settings.autoplay) 0.14f else 0.06f))
+                        .border(
+                            0.5.dp,
+                            Color.White.copy(alpha = if (settings.autoplay) 0.28f else 0.14f),
+                            CircleShape,
+                        )
+                        .clickable { SonoraBackend.setAutoplay(context, !settings.autoplay) }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Autorenew,
+                        contentDescription = null,
+                        tint = if (settings.autoplay) {
+                            MaterialTheme.colorScheme.accentText
+                        } else {
+                            Color.White.copy(alpha = 0.5f)
+                        },
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
                     Text(
-                        text = if (settings.autoplay) "Autoplay: on" else "Autoplay: off",
-                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.0.sp),
-                        color = Color.White.copy(alpha = if (settings.autoplay) 0.9f else 0.5f),
+                        text = if (settings.autoplay) "Autoplay on" else "Autoplay off",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = if (settings.autoplay) 0.92f else 0.55f),
                     )
                 }
+            }
+
+            radioLabel?.let { label ->
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.55f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 2.dp),
+                )
             }
 
             LazyColumn(

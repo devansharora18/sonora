@@ -460,6 +460,7 @@ object SonoraBackend {
             }
             activeRadio = null
             activeRadioKeys = emptySet()
+            _activeRadioLabel.value = null
         }
 
         val engine = taste(context)
@@ -493,6 +494,11 @@ object SonoraBackend {
     /** The mix a refill continues. Null once the queue is no longer the mix's. */
     @Volatile
     private var activeRadio: RadioSetup? = null
+
+    private val _activeRadioLabel = MutableStateFlow<String?>(null)
+
+    /** What the playing queue is a mix of, for the player to name it. Null when it is not one. */
+    val activeRadioLabel: StateFlow<String?> = _activeRadioLabel.asStateFlow()
 
     /** What that mix queued, so a refill can tell whether the listener is still inside it. */
     @Volatile
@@ -543,8 +549,22 @@ object SonoraBackend {
         scope.launch(Dispatchers.IO) { _radio.value = radioStore(context).load() }
     }
 
-    fun addRadioSeed(context: Context, seed: RadioSeed) =
+    /**
+     * Adds a seed, then resolves its YouTube page in the background.
+     *
+     * The pick is usable the moment it is made — the mix can be built from the name alone — and
+     * the id arrives behind it so the *next* mix costs no lookup. Resolving first would have made
+     * adding an artist wait on the network.
+     */
+    fun addRadioSeed(context: Context, seed: RadioSeed) {
         persistRadio(context, _radio.value.withSeed(seed))
+        if (seed.browseId != null) return
+
+        scope.launch {
+            val resolved = runCatching { radioDirectory(context).resolve(seed.name) }.getOrNull()
+            if (resolved != null) persistRadio(context, _radio.value.withResolved(resolved))
+        }
+    }
 
     fun removeRadioSeed(context: Context, name: String) =
         persistRadio(context, _radio.value.withoutSeed(name))
@@ -595,6 +615,8 @@ object SonoraBackend {
         if (tracks.isNotEmpty()) {
             activeRadio = setup
             activeRadioKeys = tracks.mapTo(HashSet()) { it.key }
+            _activeRadioLabel.value =
+                setup.mode.label + " · " + setup.seeds.joinToString(", ") { it.name }
         }
         return tracks
     }
