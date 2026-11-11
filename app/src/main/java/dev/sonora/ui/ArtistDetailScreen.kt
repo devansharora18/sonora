@@ -175,10 +175,22 @@ fun ArtistDetailScreen(
                 }
             }
 
+            if (artist.tracks.isNotEmpty()) {
+                item(key = "songs-heading") {
+                    Text(
+                        text = "Songs",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = Color.White,
+                        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 6.dp),
+                    )
+                }
+            }
+
             itemsIndexed(artist.tracks, key = { _, track -> track.key }) { index, track ->
                 TrackListRow(
                     track = track,
-                    meta = listOfNotNull(track.album, track.artist).joinToString("  ·  "),
+                    // Artist after album, which is the order every other list in the app uses.
+                    meta = listOfNotNull(track.artist, track.album).joinToString("  ·  "),
                     onClick = { onPlayFrom(index) },
                 )
             }
