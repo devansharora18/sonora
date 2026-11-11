@@ -609,6 +609,7 @@ private fun AlbumsSection(
 private fun AlbumRow(album: LibraryGrouping.Album, onClick: () -> Unit) {
     ArtworkRow(
         artworkFile = album.tracks.firstOrNull()?.file,
+        artworkUrl = album.tracks.firstNotNullOfOrNull { it.artworkUrl ?: it.remote?.artworkUrl },
         title = album.name,
         subtitle = listOf(
             album.artist,
@@ -640,6 +641,7 @@ private fun ArtistsSection(
         items(artists, key = { it.name }) { artist ->
             ArtworkRow(
                 artworkFile = artist.tracks.firstOrNull()?.file,
+                artworkUrl = artist.tracks.firstNotNullOfOrNull { it.artworkUrl ?: it.remote?.artworkUrl },
                 title = artist.name,
                 subtitle = listOf(
                     run {

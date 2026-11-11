@@ -159,6 +159,14 @@ internal fun ArtworkRow(
     title: String,
     subtitle: String,
     onClick: () -> Unit,
+    /**
+     * The picture for something that has no file of its own.
+     *
+     * An album or an artist built from streamed tracks has no file to read a cover out of, and
+     * those are the majority of a library in an app whose catalogue is YouTube Music. Without this
+     * the row falls back to a glyph while the same album shows its real cover on Home.
+     */
+    artworkUrl: String? = null,
     shape: Shape = RoundedCornerShape(4.dp),
 ) {
     Row(
@@ -169,7 +177,11 @@ internal fun ArtworkRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Tile(shape = shape) {
-            val artwork = if (artworkFile != null) rememberArtwork(artworkFile) else null
+            val artwork = if (artworkFile != null) {
+                rememberArtwork(artworkFile)
+            } else {
+                rememberArtworkAt(artworkUrl, px = ROW_ART_PX)
+            }
 
             if (artwork != null) {
                 Image(
