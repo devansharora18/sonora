@@ -107,6 +107,7 @@ fun NowPlayingScreen(
     onNeedPeers: () -> Unit = {},
 ) {
     val playback by SonoraPlayer.state.collectAsState()
+    val progress by SonoraPlayer.progress.collectAsState()
     val upNext by SonoraPlayer.upNext.collectAsState()
     // The queue is a panel over the player rather than a page, so it is state here and not a screen
     // the caller has to know about. A listener who opens it is still listening.
@@ -128,9 +129,9 @@ fun NowPlayingScreen(
     // Non-null only while a finger is down on the bar. Held locally so the polled position cannot
     // drag the handle back out from under the drag.
     var scrubbing by remember(track.file) { mutableStateOf<Float?>(null) }
-    val duration = playback.durationMs
+    val duration = if (progress.durationMs > 0L) progress.durationMs else playback.durationMs
     val played = scrubbing ?: if (duration > 0L) {
-        (playback.positionMs.toFloat() / duration).coerceIn(0f, 1f)
+        (progress.positionMs.toFloat() / duration).coerceIn(0f, 1f)
     } else {
         0f
     }
@@ -635,7 +636,7 @@ fun NowPlayingScreen(
                 if (wordsAlpha > 0f) {
                     LyricsPane(
                         lyrics = lyrics,
-                        positionMs = playback.positionMs,
+                        positionMs = progress.positionMs,
                         isPlaying = playback.isPlaying,
                         onSeek = { SonoraPlayer.seekTo(it) },
                         modifier = Modifier.graphicsLayer { alpha = wordsAlpha },

@@ -45,6 +45,11 @@ object SonoraPlayer {
 
     val state: StateFlow<PlaybackState> = _state.asStateFlow()
 
+    private val _progress = MutableStateFlow(Progress())
+
+    /** How far through the track playback is, as its own signal. See [syncPosition]. */
+    val progress: StateFlow<Progress> = _progress.asStateFlow()
+
     private var controller: MediaController? = null
 
     private var connecting = false
@@ -368,15 +373,21 @@ object SonoraPlayer {
     }
 
     /** Keeps the Compose progress bar in step with the service without moving playback ownership. */
+    /**
+     * The play position, on its own flow.
+     *
+     * Kept out of [state] on purpose: the position changes twice a second, and every screen in the
+     * app collects the state. Publishing it there recomposed the whole page — every shelf, every
+     * row — to move a seek bar. Only the two things that draw a position collect this.
+     */
     fun syncPosition() {
-        controller?.let { active ->
-            _state.update {
-                it.copy(
-                    positionMs = active.currentPosition.coerceAtLeast(0L),
-                    durationMs = active.duration.takeIf { duration -> duration > 0L } ?: 0L,
-                )
-            }
-        }
+        val active = controller ?: return
+
+        val now = Progress(
+            positionMs = active.currentPosition.coerceAtLeast(0L),
+            durationMs = active.duration.takeIf { duration -> duration > 0L } ?: 0L,
+        )
+        if (now != _progress.value) _progress.value = now
     }
 
     /**
@@ -585,10 +596,13 @@ object SonoraPlayer {
         // being read from the controller at the moment it is drawn — a shuffle reorders the
         // controller's own list, and a position in that list is not a position in this one.
         _upNext.value = UpNext(queue = queue, index = queueIndex)
+        _progress.value = Progress(
+            positionMs = active.currentPosition.coerceAtLeast(0L),
+            durationMs = active.duration.takeIf { it > 0L } ?: 0L,
+        )
         _state.value = PlaybackState(
             track = track,
             isPlaying = active.isPlaying,
-            positionMs = active.currentPosition.coerceAtLeast(0L),
             durationMs = active.duration.takeIf { it > 0L } ?: 0L,
             isShuffled = active.shuffleModeEnabled,
             repeatMode = repeatModeOf(active.repeatMode),
