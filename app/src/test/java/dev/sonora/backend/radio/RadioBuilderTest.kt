@@ -94,6 +94,22 @@ class RadioBuilderTest {
     }
 
     @Test
+    fun `a track credited to a collaborator is queued once`() = runBlocking {
+        // An artist page lists collaborations credited to the other artist first, so the same
+        // track arrives through the radio as an outsider and through the catalogue as a pick.
+        val collab = ref("This Is What You Came For", "Calvin Harris")
+
+        val mix = builder(
+            engine(),
+            catalogue = { listOf(collab) },
+            radio = { listOf(collab, ref("Umbrella", "Rihanna")) },
+        ).build(setup("Rihanna", stop = 1), library = emptyList(), count = 10)
+
+        assertEquals(mix.distinctBy { it.key }.size, mix.size)
+        assertEquals(1, mix.count { it.key == collab.key })
+    }
+
+    @Test
     fun `familiar only leaves out anything never played and never downloaded`() = runBlocking {
         val engine = engine()
         val played = ref("played", "Billie Eilish")

@@ -72,6 +72,11 @@ class RadioBuilder(
         for (seed in setup.seeds) {
             for (ref in runCatching { seedCatalogue(seed) }.getOrDefault(emptyList())) {
                 offer(ref, fromSeeds)
+                // A row on the artist's page can be credited to a collaborator first, so the very
+                // same track may already have arrived through the radio or the library and been
+                // classed as an outsider. It belongs to the picks half here, and it must not stay
+                // in the other one as well — blend draws from both lists and would queue it twice.
+                fromOthers.remove(ref.key)
             }
         }
 
