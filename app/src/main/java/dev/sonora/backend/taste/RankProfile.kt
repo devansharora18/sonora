@@ -19,6 +19,14 @@ data class RankProfile(
     val noveltyBonus: Double = TasteEngine.NOVELTY_BONUS,
     /** Multiplied by a track's own skip rate, once it has been played twice. */
     val skipPenalty: Double = TasteEngine.SKIP_PENALTY,
+    /**
+     * How many recently played tracks to keep out of the result.
+     *
+     * Autoplay's answer to "do not repeat yourself". A familiar mix wants the opposite: the tracks
+     * just played are the most familiar ones there are, so it sets this to zero and only the track
+     * playing now is excluded.
+     */
+    val repeatWindow: Int = TasteEngine.RECENT_WINDOW,
 ) {
 
     companion object {
@@ -34,6 +42,7 @@ data class RankProfile(
         val FAMILIAR = RankProfile(
             familiarityWeight = TasteEngine.FAMILIARITY_WEIGHT * 2.0,
             noveltyBonus = 0.0,
+            repeatWindow = 0,
         )
 
         /**

@@ -144,20 +144,35 @@ class TasteAutoplayTest {
 
     @Test
     fun `a same-artist streak yields to a different artist`() = runBlocking {
-        val engine = engine(seed = 3)
+        // One batch from one seed is a coin flip — six candidates, four picks — so this asserts the
+        // property across seeds. A uniform draw would put the other artist in about half the
+        // batches; the repeat penalty is what has to make it most of them.
+        val seeds = 1..12
+        var included = 0
 
-        // Five tracks by one artist, all strongly liked, and one by another with no history.
-        val sameArtist = (1..5).map { ref("Same $it", "SameArtist") }
-        val other = ref("Different", "OtherArtist")
-        var at = 0L
-        for (track in sameArtist) {
-            engine.play(track, at, liked = true)
-            at += 1_000
+        for (seed in seeds) {
+            val engine = engine(seed = seed)
+
+            // Five tracks by one artist, all strongly liked, and one by another with no history.
+            // Played more than a session apart, so no transition edges form: what is under test is
+            // the repeat penalty, not the recorded chain Same1 -> Same2 -> … which would win on its
+            // own and make the batch a replay of the fixture.
+            val sameArtist = (1..5).map { ref("Same $it", "SameArtist") }
+            val other = ref("Different", "OtherArtist")
+            var at = 0L
+            for (track in sameArtist) {
+                engine.play(track, at, liked = true)
+                at += TasteEngine.SESSION_GAP_MS + 1_000
+            }
+            engine.play(other, at, liked = true)
+
+            val picked = engine.next(sameArtist.first(), 4) { listOf(other) }
+            if (picked.any { it.artistKey == other.artistKey }) included++
         }
-        engine.play(other, at, liked = true)
 
-        val picked = engine.next(sameArtist.first(), 4) { listOf(other) }
-
-        assertTrue("the batch should include the other artist", picked.any { it.artistKey == other.artistKey })
+        assertTrue(
+            "the other artist appeared in only $included of ${seeds.count()} batches",
+            included >= 10,
+        )
     }
 }

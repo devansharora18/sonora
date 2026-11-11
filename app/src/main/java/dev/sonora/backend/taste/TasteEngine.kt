@@ -202,7 +202,8 @@ class TasteEngine(
     ): List<TrackRef> {
         if (count <= 0 || pool.isEmpty()) return emptyList()
 
-        val excluded = snapshot.recent.takeLast(RECENT_WINDOW).toMutableSet()
+        val window = profile.repeatWindow.coerceAtLeast(0)
+        val excluded = if (window == 0) mutableSetOf() else snapshot.recent.takeLast(window).toMutableSet()
         cur?.let { excluded += it.key }
 
         // The recent window is a preference, not a veto: a model smaller than the window would
@@ -356,7 +357,10 @@ class TasteEngine(
     private fun sample(scored: List<Pair<TrackRef, Double>>, limit: Int): TrackRef? {
         if (scored.isEmpty()) return null
 
-        val top = scored.sortedByDescending { it.second }.take(limit)
+        // Shuffled before the sort so equal scores are broken at random. Without it a cold model —
+        // where every candidate scores the same — would always draw from the first few entries of
+        // the pool, which for a seeded mix means the first seed's radio and nothing else.
+        val top = scored.shuffled(random).sortedByDescending { it.second }.take(limit)
         if (top.size == 1) return top.first().first
 
         val max = top.maxOf { it.second }
