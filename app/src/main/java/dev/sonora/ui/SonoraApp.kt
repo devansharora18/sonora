@@ -363,6 +363,7 @@ private fun MainTabs(state: BackendState) {
         var tab by remember { mutableStateOf(MainTab.Home) }
         var playerOpen by remember { mutableStateOf(false) }
         var tasteOpen by remember { mutableStateOf(false) }
+        var radioOpen by remember { mutableStateOf(false) }
         var addTarget by remember { mutableStateOf<LibraryTrack?>(null) }
         // The Spotify import is a sequence with its own state, so it outlives the screen that
         // opened it — a listener who switches tabs mid-import should not lose their progress.
@@ -433,6 +434,7 @@ private fun MainTabs(state: BackendState) {
                         .statusBarsPadding(),
                 ) {
                     HomeScreen(
+                        onOpenRadio = { radioOpen = true },
                         onImportSpotify = { spotifyImport = true },
                         onOpenShelfPlaylist = { homePages += ShelfPage.Playlist(it) },
                         onOpenCategory = { homePages += ShelfPage.Category(it) },
@@ -708,6 +710,26 @@ private fun MainTabs(state: BackendState) {
                         )
                         tab = MainTab.Library
                         playerOpen = false
+                    },
+                )
+            }
+        }
+
+        if (radioOpen) {
+            BackHandler { radioOpen = false }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .statusBarsPadding(),
+            ) {
+                RadioScreen(
+                    onBack = { radioOpen = false },
+                    onPlay = { _, tracks ->
+                        // The mix replaces the queue: it is a thing to listen to now, not something
+                        // to append to whatever was already there.
+                        SonoraPlayer.play(context, tracks, 0)
+                        radioOpen = false
                     },
                 )
             }

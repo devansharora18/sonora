@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,8 +22,10 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.rounded.Radio
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MusicNote
@@ -72,6 +75,7 @@ fun HomeScreen(
     onImportSpotify: () -> Unit = {},
     onOpenShelfPlaylist: (YtmPlaylistRef) -> Unit = {},
     onOpenCategory: (YtmCategory) -> Unit = {},
+    onOpenRadio: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val tracks by SonoraBackend.library.collectAsState()
@@ -144,6 +148,10 @@ fun HomeScreen(
                 )
             }
         }
+
+        // First, because it is the one thing here that starts something rather than resuming it:
+        // every other row is about what already exists.
+        item(key = "radio-entry") { RadioEntryCard(onClick = onOpenRadio) }
 
         val active = download
         if (active is DownloadState.Downloading) {
@@ -218,6 +226,63 @@ fun HomeScreen(
                 onOpen = { playlist -> onOpenShelfPlaylist(playlist) },
             )
         }
+    }
+}
+
+/**
+ * The way into Radio from the page a listener actually opens.
+ *
+ * A card rather than a tab or a menu entry: starting a mix is the one thing on Home that does not
+ * depend on having found something first, so it is worth a shape of its own.
+ */
+@Composable
+private fun RadioEntryCard(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = PAGE_GUTTER)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.accentText),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Radio,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.background,
+                modifier = Modifier.size(26.dp),
+            )
+        }
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = "Start a radio",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                text = "Pick a few artists, then choose how far out it reaches",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+            )
+        }
+
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
