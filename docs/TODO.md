@@ -27,8 +27,9 @@ network available and once in airplane mode (cold start must fall back without c
 
 1. Home → **Start a radio** → add two artists → confirm the picker lists your top artists first
    with their real pictures (needs network; the suggestion lookup is one request per artist).
-2. Drag the variety slider to the far left, press **Play mix**, open the queue: every track should
-   be by a picked artist. Repeat at the far right: none should be.
+2. Drag the variety slider across all five stops and press **Play mix** at each; the queue should
+   be 100:0, 80:20, 60:40, 50:50 and 30:70 picked artists to everyone else. The far right still
+   keeps 30% for the picks.
 3. Press **Save**, then check Home's *Your radios* shelf and Library → *Radios*. Play from the
    Library's disc; the queue header should read `Radio · <artists>`.
 4. Tap the saved radio's row: its artists and variety should come back into the Radio screen.
@@ -36,6 +37,16 @@ network available and once in airplane mode (cold start must fall back without c
    the filter working, not a failure.
 6. Airplane mode: pressing **Play mix** should show "Could not build that mix" and leave the queue
    untouched.
+7. Search the artist picker for a name that returns several artists ("passenger" returns six):
+   the list must render, and only the one actually added may read **Added**.
+
+### Search as you type
+
+1. Type into Search without pressing enter: results, artists and albums appear after a pause.
+2. Type a word and delete it before the pause: nothing is asked, and the previous page stays.
+3. Check Settings → Taste does not grow from typing, and the recent-search list on Search shows
+   only queries that were submitted.
+4. On the Soulseek tab, typing should query peers after a longer pause rather than never.
 
 ### Persistence across process death
 

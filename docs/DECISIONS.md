@@ -6,11 +6,22 @@ one is the way it is. Newest first.
 ## Radio
 
 **Variety is a proportion, not three modes.** The first build had Blended / Discover / Familiar as
-three mixes. They are now one slider: 0 means only the picked artists, 1 means almost entirely
-artists around them, and a mix is built to that ratio. Three named modes asked the listener to
-choose between things they could not see; a slider shows its answer in the caption under it, and
-the ends of its range mean something exact. `RadioBuilder.blend` meets the ratio by target count
-per slot rather than by a fixed pattern, so both ends are exact and the middle is even.
+three mixes. They are now one slider over five stops, each an exact share of the queue from the
+picked artists: **100:0, 80:20, 60:40, 50:50, 30:70**. Three named modes asked the listener to
+choose between things they could not see; a ratio can be read off the caption. The stops are not
+evenly spaced and the last still keeps 30% for the picks — the far end means "mostly new", not
+"none of what I asked for". `RadioBuilder.blend` hits each share by tracking the target count per
+slot, so a stop is exact rather than approximate.
+
+**The artist's own catalogue is what supplies a high share.** A radio seeded by an artist answers
+with the neighbourhood — mostly other people — so the first build could not fill an 80:20 queue and
+filled it with neighbours instead. `RadioArtistDirectory.tracksFor` now keeps the artist page's
+whole track list and `RadioBuilder` takes `seedCatalogue` from it. Without this the slider's left
+half was a promise the pool could not keep.
+
+**The picker dedupes by artist id before it draws.** Two search results whose names fold together
+("Passenger", six times over) were two list items with one key, which is an immediate crash. Rows
+are keyed by browse id, and the list is deduped by it first.
 
 **Familiar only stayed a separate switch.** It is not a point on the variety axis — it is a promise
 about every track regardless of reach — so it filters the pool on both sides of the blend instead of
@@ -40,6 +51,22 @@ there" and every lookup degrades to null. One silent artist does not empty a mix
 **Discover's artist cap was replaced by the blend.** The old rule capped picked artists at a third
 and packed them at the front, because ranking puts the listener's own artists first. The blend's
 target-count logic puts them where the variety asks, so the cap has nothing left to do.
+
+## Search
+
+**Live results are the catalogue only; the peer network is asked on submit.** A YouTube search is
+one HTTPS request; a Soulseek search is a broadcast to strangers that takes seconds to answer. The
+debounced path therefore asks the catalogue on every pause, and the peer search when the Soulseek
+tab is the one showing — where waiting for a submit would leave the page blank under a query that
+was already typed.
+
+**Typing does not write search history.** `searchWhileTyping` passes `record = false`; only a
+submitted search is remembered. A history full of "b", "bi", "bil" is worse than no history.
+
+**The search box is the listener's while it is focused.** It used to be keyed on the committed
+query, which was harmless when a search only happened on submit. With results arriving per pause,
+re-keying the field would rewrite it under the finger — the visible version being a trailing space
+that disappears mid-word.
 
 ## Player and lists
 

@@ -31,15 +31,25 @@ Home → Start a radio → pick artists → a mix.
 
 One screen. Pick one to five artists, set one slider, play it, keep it.
 
-**Variety** is the whole control, and it is a proportion rather than a choice between named mixes:
-at 0 the mix is only the artists that were picked, at 1 it is almost entirely artists around them,
-and every value between is the share the slider says. The caption under it spells out where it
-currently sits, so the position is never the only explanation.
+**Variety** is the whole control, and it is a proportion rather than a choice between named mixes.
+It has five stops, and each is an exact share of the queue from the picked artists:
+
+| Stop | Picked artists | From around them |
+|---|---|---|
+| 1 | 100% | 0% |
+| 2 | 80% | 20% |
+| 3 | 60% | 40% |
+| 4 | 50% | 50% |
+| 5 | 30% | 70% |
+
+The caption under the slider prints the ratio it is on, so the position is never the only
+explanation. The picked artists' own catalogue is what supplies their share; the radio seeded by
+each artist supplies the rest.
 
 | Control | What it does |
 |---|---|
 | Artists | 1–5 seeds, added from the listening history or by searching the catalogue |
-| Variety | 0 = only the picked artists · 1 = almost all neighbours |
+| Variety | five stops: 100:0, 80:20, 60:40, 50:50, 30:70 |
 | Familiar only | filters both sides to music played, liked or downloaded |
 | Save | keeps artists + variety + familiar flag as a radio on Home and in the Library |
 
@@ -103,13 +113,13 @@ RadioSeed(            // one picked artist
 
 RadioSetup(           // the draft, persisted
   seeds: List<RadioSeed>,   // 0..5, in pick order
-  variety: Float,           // 0..1, default 0.3
+  stop: Int,                // index into SHARES = [1.0, 0.8, 0.6, 0.5, 0.3]
   familiarOnly: Boolean,
 )
 
 SavedRadio(           // a kept radio
   id: String, name: String,
-  seeds: List<RadioSeed>, variety: Float, familiarOnly: Boolean, createdAt: Long,
+  seeds: List<RadioSeed>, stop: Int, familiarOnly: Boolean, createdAt: Long,
 )
 
 RadioState(           // radio.json
@@ -164,8 +174,8 @@ The three named mixes were replaced by the variety slider after the first build;
   mix** with the slider at the middle, then at least ten tracks play and about half are the picks.
 - Given any selection, when the slider is at the far left, then every track in the queue is by a
   picked artist.
-- Given any selection with neighbours available, when the slider is at the far right, then no track
-  in the queue is by a picked artist.
+- Given any selection with neighbours available, when the slider is on stop 2, then 80% of the queue
+  is by a picked artist; on stop 5, 30%.
 - Given a taste model with plays, when **Familiar only** is on, then every track in the queue has
   been played, liked or downloaded before.
 - Given a mix is playing, when it reaches the last five tracks, then it refills with the same

@@ -45,8 +45,9 @@ survive uninstalling the app. Anything that is only streamed is kept with its ow
 playlist entry, a like or a line of listening history can still be drawn, played and shown — which is
 what stops a liked song from failing to appear in Liked Songs.
 
-- **Search** — top result, then artists, albums and songs from YouTube Music, with a toggle to look
-  at the peer network on its own for something lossless. Relevance-ranked, with size, bitrate, peer
+- **Search** — results appear as you type, with no submit: top result, then artists, albums and
+  songs from YouTube Music. A toggle looks at the peer network on its own for something lossless,
+  and that search is sent when you stop typing on its tab rather than once per letter. Relevance-ranked, with size, bitrate, peer
   and free-slot signals; sort by best match, fastest, free slot or quality.
 - **Streaming** — YouTube Music audio straight to the player, read in bounded ranges and verified
   past the first megabyte before it is handed over, so a track cannot start and then die a minute in.
