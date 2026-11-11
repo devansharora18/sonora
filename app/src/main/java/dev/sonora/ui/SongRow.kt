@@ -3,7 +3,6 @@ package dev.sonora.ui
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -27,15 +25,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sonora.backend.LibraryTrack
@@ -60,9 +55,6 @@ private val ROW_ART = 52.dp
 
 private val ROW_GAP = 14.dp
 
-/** How far a swipe has to travel before it counts as "queue this", as a fraction of the row. */
-private const val SWIPE_COMMIT = 0.45f
-
 @Composable
 internal fun SongRow(
     track: LibraryTrack,
@@ -70,7 +62,6 @@ internal fun SongRow(
     modifier: Modifier = Modifier,
     onLongPress: (() -> Unit)? = null,
     onMore: (() -> Unit)? = null,
-    onSwipeToQueue: (() -> Unit)? = null,
     /** Replaces the artwork with a position in a tracklist, for album and playlist listings. */
     trackNumber: Int? = null,
     /** The line under the title. Passed in because it differs: artist, or artist and file size. */
@@ -117,19 +108,11 @@ internal fun SongRow(
             )
         }
 
-        // The swipe is drawn behind the row and revealed by the row moving off it, which is why the
-        // reveal is a clip of the row's own bounds rather than a second surface: anything drawn
-        // behind a moving row has to be clipped to it, or it shows at the row's edges.
-        if (onSwipeToQueue != null) {
-            QueueSwipeBackground()
-        }
-
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(background)
                 .rowClickable(onClick = onClick, onLongClick = onLongPress)
-                .swipeable(onSwipeToQueue)
                 .padding(horizontal = PAGE_GUTTER, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -244,68 +227,6 @@ private fun ArtworkTile(track: LibraryTrack, size: androidx.compose.ui.unit.Dp) 
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-    }
-}
-
-/** What a swipe reveals: the two things a row can be dragged into the queue for. */
-@Composable
-private fun BoxScope.QueueSwipeBackground() {
-    Box(
-        modifier = Modifier
-            .matchParentSize()
-            .background(MaterialTheme.colorScheme.accentText.copy(alpha = 0.18f)),
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        Row(
-            modifier = Modifier.padding(start = PAGE_GUTTER + 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.PlaylistAdd,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.accentText,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = "Queue",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.accentText,
-            )
-        }
-    }
-}
-
-/**
- * Reports a horizontal drag as "queue this", once it has gone far enough.
- *
- * The threshold is a fraction of the row's own width rather than a fixed distance, so the gesture
- * costs the same proportion of a swipe on a small phone as on a large one. A swipe that falls short
- * springs back to nothing, because a row that stays half-moved reads as a row stuck in a state.
- */
-@Composable
-private fun Modifier.swipeable(onSwipeToQueue: (() -> Unit)?): Modifier {
-    if (onSwipeToQueue == null) return this
-    val current by rememberUpdatedState(onSwipeToQueue)
-
-    return this.pointerInput(Unit) {
-        var total = 0f
-        var width = 1f
-        var fired = false
-
-        detectHorizontalDragGestures(
-            onDragStart = { total = 0f; fired = false },
-            onDragCancel = { total = 0f },
-            onDragEnd = {
-                if (!fired && total >= width * SWIPE_COMMIT) current()
-                total = 0f
-            },
-            onHorizontalDrag = { change, amount ->
-                change.consume()
-                total += amount
-                fired = true
-            },
-        )
     }
 }
 
