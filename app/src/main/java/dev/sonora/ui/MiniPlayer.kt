@@ -50,14 +50,13 @@ import dev.sonora.backend.LibraryTrack
 import dev.sonora.ui.theme.accentText
 
 /**
- * The play and skip glyph slots.
+ * The play and skip glyph slots, and the bar's height.
  *
- * Deliberately grown inside the slot rather than by growing the slot: the slot is level with the
- * 40dp artwork opposite it, and it is the taller of the two that sets the row's height — so a bigger
- * slot would make the whole bar taller, which is not what a bigger glyph is being asked for. At 32
- * there is still 4dp of clearance to the slot's edge on every side.
+ * 48 rather than 40 because these are the three most-tapped controls in the app and Material's
+ * minimum target is 48dp. The slot is now taller than the 40dp artwork opposite it, so it is the
+ * slot that sets the bar's height; the glyphs stay the size they were inside it.
  */
-private val GLYPH_SLOT = 40.dp
+private val GLYPH_SLOT = 48.dp
 
 private val PLAY_GLYPH_SIZE = 36.dp
 private val SKIP_GLYPH_SIZE = 22.dp
@@ -78,8 +77,8 @@ private val SPINNER_SIZE = 22.dp
 private val TRANSPORT_GAP = 8.dp
 
 /**
- * Vertical padding, which with the 40dp artwork sets the bar's height at 56dp and so its pill radius
- * at 28.
+ * Vertical padding, which with the 48dp glyph slot sets the bar's height at 64dp and so its pill
+ * radius at 32.
  */
 private val ROW_PADDING_VERTICAL = 8.dp
 

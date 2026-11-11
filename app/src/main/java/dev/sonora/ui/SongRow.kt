@@ -193,7 +193,9 @@ internal fun SongRow(
                     icon = Icons.Filled.MoreVert,
                     contentDescription = "More",
                     onClick = onMore,
-                    modifier = Modifier.size(36.dp),
+                    // 48, not 36: the glyph stays the size it is, and the target grows around it.
+                    size = 48.dp,
+                    glyphSize = 20.dp,
                     disc = false,
                 )
             }
