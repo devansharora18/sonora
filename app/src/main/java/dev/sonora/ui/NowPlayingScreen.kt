@@ -721,8 +721,10 @@ fun NowPlayingScreen(
                         modifier = Modifier
                             .padding(top = 8.dp)
                             .clip(badgeShape)
-                            .background(Color.White.copy(alpha = 0.12f))
-                            .border(0.5.dp, Color.White.copy(alpha = 0.15f), badgeShape)
+                            // 0.18 fill and 0.32 edge, not 0.12/0.15: against a bright sleeve the
+                            // badge was a white label on white with a hairline nobody could see.
+                            .background(Color.White.copy(alpha = 0.18f))
+                            .border(0.5.dp, Color.White.copy(alpha = 0.32f), badgeShape)
                             .padding(horizontal = 8.dp, vertical = 3.dp),
                     ) {
                         Text(
@@ -731,7 +733,7 @@ fun NowPlayingScreen(
                                 fontWeight = FontWeight.SemiBold,
                                 letterSpacing = 0.6.sp,
                             ),
-                            color = Color.White.copy(alpha = 0.85f),
+                            color = Color.White,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
