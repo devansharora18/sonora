@@ -8,10 +8,18 @@ import android.provider.DocumentsContract
 import android.util.Log
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import dev.sonora.backend.radio.RadioArtistDirectory
+import dev.sonora.backend.radio.RadioBuilder
+import dev.sonora.backend.radio.RadioSeed
+import dev.sonora.backend.radio.RadioSetup
+import dev.sonora.backend.radio.RadioState
+import dev.sonora.backend.radio.SavedRadio
+import dev.sonora.backend.radio.RadioStore
 import dev.sonora.backend.taste.Origin
 import dev.sonora.backend.taste.TasteEngine
 import dev.sonora.backend.taste.TasteModel
 import dev.sonora.backend.taste.TasteStore
+import dev.sonora.backend.taste.TasteSummary
 import dev.sonora.backend.taste.TasteTransfer
 import dev.sonora.backend.taste.TrackRef
 import dev.sonora.backend.taste.toLibraryTrack
@@ -35,6 +43,7 @@ import dev.sonora.ytm.YtmShelves
 import dev.sonora.ytm.YtmTrack
 import java.io.File
 import java.util.UUID
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -76,6 +85,9 @@ object SonoraBackend {
     /** A broad query can match hundreds of thousands of files; keep the list bounded. */
     private const val MAX_RETAINED_HITS = 500
 
+    /** The fewest characters worth asking the catalogue about while the listener is still typing. */
+    private const val LIVE_SEARCH_MIN_CHARS = 2
+
     private val AUDIO_EXTENSIONS = setOf("mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "wma", "aiff", "alac")
 
     private val WHITESPACE = Regex("\\s+")
@@ -90,6 +102,10 @@ object SonoraBackend {
     private const val SEARCH_HISTORY_FILE = "searches.json"
     private const val PLAY_HISTORY_FILE = "plays.json"
     private const val TASTE_FILE = "taste.json"
+    private const val RADIO_FILE = "radio.json"
+
+    /** How many of the model's strongest artists the picker offers before a search. */
+    private const val SUGGESTED_SEEDS = 8
 
     /** Synthetic plays from an import are spaced this far apart so no edge can form. */
     private const val SEED_SPACING_MS = 60L * 60L * 1000L
@@ -437,6 +453,40 @@ object SonoraBackend {
      * local lossless file behind it is preferred there, so this never has to choose.
      */
     suspend fun autoplayNext(context: Context, cur: TrackRef?, count: Int): List<LibraryTrack> {
+        // A queue that came from a mix keeps its mode when it runs low, which is what stops a
+        // Discover mix turning into Autoplay four tracks after it starts.
+        val radio = activeRadio
+        if (radio != null) {
+            // Only while the queue is still the mix. A track the listener started by hand means the
+            // radio is over, and refilling with the mix would hijack their choice.
+            if (cur == null || cur.key in activeRadioKeys) {
+                var more = buildRadioRefs(context, radio, count, exclude = activeRadioKeys)
+
+                // The catalogue is finite and this radio has been through most of it. Topping the
+                // batch up from the whole pool keeps the queue from dribbling out one track at a
+                // time, and it keeps the promise the slider made: an endless queue of *these*
+                // artists. Falling through to Autoplay instead would quietly turn a 100:0 radio
+                // into a mix with strangers in it.
+                if (more.size < count && activeRadioKeys.isNotEmpty()) {
+                    val repeats = buildRadioRefs(
+                        context,
+                        radio,
+                        count - more.size,
+                        exclude = more.mapTo(HashSet()) { it.key },
+                    )
+                    more = more + repeats
+                }
+
+                if (more.isNotEmpty()) {
+                    activeRadioKeys = activeRadioKeys + more.map { it.key }
+                    return more.mapNotNull { it.toLibraryTrack() }
+                }
+            }
+            activeRadio = null
+            activeRadioKeys = emptySet()
+            _activeRadioLabel.value = null
+        }
+
         val engine = taste(context)
         // Scoring walks the model; the radio call inside `next` is non-blocking, so the whole pick
         // runs off the main thread and the refill never competes with a frame.
@@ -447,6 +497,236 @@ object SonoraBackend {
             }
         }
         return refs.mapNotNull { it.toLibraryTrack() }
+    }
+
+    // ---- Radio --------------------------------------------------------------------------------
+
+    @Volatile
+    private var radioStore: RadioStore? = null
+
+    @Volatile
+    private var radioDirectory: RadioArtistDirectory? = null
+
+    @Volatile
+    private var radioBuilder: RadioBuilder? = null
+
+    private val _radio = MutableStateFlow(RadioState())
+
+    /** The draft being edited and every saved radio. */
+    val radio: StateFlow<RadioState> = _radio.asStateFlow()
+
+    /** The mix a refill continues. Null once the queue is no longer the mix's. */
+    @Volatile
+    private var activeRadio: RadioSetup? = null
+
+    private val _activeRadioLabel = MutableStateFlow<String?>(null)
+
+    /** What the playing queue is a mix of, for the player to name it. Null when it is not one. */
+    val activeRadioLabel: StateFlow<String?> = _activeRadioLabel.asStateFlow()
+
+    /**
+     * Every track this mix has queued, keyed the way [TrackRef] keys it.
+     *
+     * Ref keys, not player keys: the refill is handed a [TrackRef] and compares against this, and
+     * the two spellings of a track (`artist|title` versus `ytm:<id>`) never match. Getting that
+     * wrong is invisible until the first refill, at which point the mix is dropped and Autoplay
+     * carries on with other artists under the radio's name.
+     */
+    @Volatile
+    private var activeRadioKeys: Set<String> = emptySet()
+
+    private fun radioStore(context: Context): RadioStore = radioStore ?: synchronized(this) {
+        radioStore ?: RadioStore(File(context.filesDir, RADIO_FILE)).also { radioStore = it }
+    }
+
+    private fun radioDirectory(context: Context): RadioArtistDirectory =
+        radioDirectory ?: synchronized(this) {
+            radioDirectory ?: RadioArtistDirectory().also { radioDirectory = it }
+        }
+
+    /**
+     * The builder, wired to the two network sources.
+     *
+     * Built once per process: the directory it holds caches every artist it has resolved, and a
+     * refill that rebuilt it would pay for the same lookups again.
+     */
+    private fun radioBuilder(context: Context): RadioBuilder = radioBuilder ?: synchronized(this) {
+        radioBuilder ?: run {
+            val directory = radioDirectory(context)
+            RadioBuilder(
+                engine = taste(context),
+                seedRadio = { seed ->
+                    val videoId = directory.trackFor(seed)
+                    if (videoId == null) {
+                        emptyList()
+                    } else {
+                        YtmRadio.related(videoId).map { it.toTrackRef() }
+                    }
+                },
+                relatedTo = { ref ->
+                    val videoId = ref.ytmId
+                    if (videoId == null) {
+                        emptyList()
+                    } else {
+                        YtmRadio.related(videoId).map { it.toTrackRef() }
+                    }
+                },
+                seedCatalogue = { seed ->
+                    directory.tracksFor(seed).map { it.toTrackRef() }
+                },
+            ).also { radioBuilder = it }
+        }
+    }
+
+    /** Reads the picked artists off disk and publishes them. */
+    fun refreshRadio(context: Context) {
+        scope.launch(Dispatchers.IO) { _radio.value = radioStore(context).load() }
+    }
+
+    /**
+     * Adds a seed, then resolves its YouTube page in the background.
+     *
+     * The pick is usable the moment it is made — the mix can be built from the name alone — and
+     * the id arrives behind it so the *next* mix costs no lookup. Resolving first would have made
+     * adding an artist wait on the network.
+     */
+    fun addRadioSeed(context: Context, seed: RadioSeed) {
+        persistDraft(context) { it.withSeed(seed) }
+        if (seed.browseId != null) return
+
+        scope.launch {
+            val resolved = runCatching { radioDirectory(context).resolve(seed.name) }.getOrNull()
+            if (resolved != null) persistDraft(context) { it.withResolved(resolved) }
+        }
+    }
+
+    fun removeRadioSeed(context: Context, seed: RadioSeed) =
+        persistDraft(context) { it.without(seed) }
+
+    fun setRadioStop(context: Context, stop: Int) =
+        persistDraft(context) { it.withStop(stop) }
+
+    fun setRadioFamiliar(context: Context, familiarOnly: Boolean) =
+        persistDraft(context) { it.copy(familiarOnly = familiarOnly) }
+
+    private fun persistDraft(context: Context, edit: (RadioSetup) -> RadioSetup) {
+        persistRadio(context, _radio.value.copy(draft = edit(_radio.value.draft)))
+    }
+
+    private fun persistRadio(context: Context, state: RadioState) {
+        _radio.value = state
+        scope.launch(Dispatchers.IO) { radioStore(context).save(state) }
+    }
+
+    /**
+     * Keeps the draft as a radio, and returns it.
+     *
+     * Saving the same artists twice with different variety makes two radios on purpose: the mix is
+     * the ingredients, and two settings of them are two things worth going back to.
+     */
+    fun saveRadio(context: Context, name: String = ""): SavedRadio? {
+        val draft = _radio.value.draft
+        if (!draft.isReady) return null
+
+        val radio = SavedRadio(
+            id = UUID.randomUUID().toString(),
+            name = name.trim().ifBlank { defaultRadioName(draft) },
+            seeds = draft.seeds,
+            stop = draft.stop,
+            familiarOnly = draft.familiarOnly,
+            createdAt = System.currentTimeMillis(),
+        )
+        persistRadio(context, _radio.value.withRadio(radio))
+        return radio
+    }
+
+    fun deleteRadio(context: Context, id: String) =
+        persistRadio(context, _radio.value.without(id))
+
+    /** Loads a saved radio back into the draft, ready to tune or press play on. */
+    fun editRadio(context: Context, id: String) {
+        val radio = _radio.value.saved.firstOrNull { it.id == id } ?: return
+        persistDraft(context) { radio.toDraft() }
+    }
+
+    /** The name a saved radio gets when the listener does not give it one. */
+    fun defaultRadioName(setup: RadioSetup): String {
+        val names = setup.seeds.take(2).joinToString(", ") { it.name }
+        val rest = setup.seeds.size - 2
+        return if (rest > 0) "$names +$rest" else names.ifBlank { "Radio" }
+    }
+
+    /**
+     * Artists worth offering before anyone searches: the strongest ones the model knows.
+     *
+     * Resolved to their YouTube pages so a suggestion can be added with one tap and no second
+     * request later. A name the catalogue does not know is dropped rather than shown as a pick that
+     * would build nothing.
+     */
+    suspend fun radioSuggestions(context: Context, limit: Int = SUGGESTED_SEEDS): List<RadioSeed> {
+        val model = taste(context).snapshot()
+        val names = withContext(Dispatchers.Default) {
+            TasteSummary.of(model, limit = limit).artists.map { it.name }
+        }
+        val directory = radioDirectory(context)
+        return names.mapNotNull { runCatching { directory.resolve(it) }.getOrNull() }
+    }
+
+    /** Artist search for the picker. */
+    suspend fun searchRadioArtists(context: Context, query: String): List<RadioSeed> {
+        if (query.isBlank()) return emptyList()
+
+        val found = runCatching { YtmCatalogSearch.artists(query) }.getOrDefault(emptyList())
+        return found.map { RadioSeed(it.title, it.browseId, it.artworkUrl) }
+    }
+
+    /**
+     * Builds the mix for [mode] and returns it ready to queue.
+     *
+     * Empty when nothing could be built — no artists picked, no network, or every seed silent —
+     * which is the screen's cue to say so rather than start an empty player.
+     */
+    suspend fun startRadio(context: Context): List<LibraryTrack> =
+        startRadio(context, _radio.value.draft)
+
+    /** Plays a saved radio without disturbing the draft it was saved from. */
+    suspend fun startSavedRadio(context: Context, id: String): List<LibraryTrack> {
+        val radio = _radio.value.saved.firstOrNull { it.id == id } ?: return emptyList()
+        return startRadio(context, radio.toDraft())
+    }
+
+    private suspend fun startRadio(context: Context, setup: RadioSetup): List<LibraryTrack> {
+        val refs = buildRadioRefs(context, setup, RadioBuilder.MIX_SIZE, exclude = emptySet())
+        if (refs.isEmpty()) return emptyList()
+
+        activeRadio = setup
+        activeRadioKeys = refs.mapTo(HashSet()) { it.key }
+        // The ratio is in the label so the queue can be checked against the slider at a glance —
+        // a mix is built at the stop it was started with, and moving the slider afterwards does
+        // not rebuild what is already playing.
+        val picked = (setup.selectedShare * 100).roundToInt()
+        _activeRadioLabel.value =
+            (if (setup.familiarOnly) "Familiar · " else "Radio · ") +
+            "$picked:${100 - picked} · " +
+            setup.seeds.joinToString(", ") { it.name }
+
+        return refs.mapNotNull { it.toLibraryTrack() }
+    }
+
+    private suspend fun buildRadioRefs(
+        context: Context,
+        setup: RadioSetup,
+        count: Int = RadioBuilder.MIX_SIZE,
+        exclude: Set<String>,
+    ): List<TrackRef> {
+        if (!setup.isReady) return emptyList()
+
+        val builder = radioBuilder(context)
+        val library = withContext(Dispatchers.Default) { _library.value.map { it.toTrackRef() } }
+
+        return withContext(Dispatchers.Default) {
+            builder.build(setup = setup, library = library, count = count, exclude = exclude)
+        }
     }
 
     /** Wipes the learned model. */
@@ -1230,6 +1510,32 @@ object SonoraBackend {
     }
 
     /**
+     * The answer to what has been typed so far, while it is still being typed.
+     *
+     * Two things make this different from [search]. Nothing is written to the search history — a
+     * keystroke is not a search the listener would want to see offered back to them — and the peer
+     * network is only asked when [peers] is set, because a query broadcast to strangers is not
+     * worth sending once per letter. The catalogue is cheap and is what the page is mostly made of.
+     *
+     * A term already searched is not searched again, so a slow typist pausing mid-word does not
+     * re-ask for what is already on screen.
+     */
+    fun searchWhileTyping(context: Context, query: String, peers: Boolean) {
+        val term = query.trim()
+        if (term.length < LIVE_SEARCH_MIN_CHARS) return
+        if (_search.value.query == term) return
+
+        if (peers) {
+            searchPeers(context, term, record = false, youtubeLoading = true)
+        } else {
+            // Set by hand because [searchPeers] is what normally does it, and it is not being
+            // called: without this the page would still be showing the previous query's rows.
+            _search.value = SearchState(query = term, youtubeLoading = true)
+        }
+        loadYoutube(term)
+    }
+
+    /**
      * Asks the peer network only, for a file rather than a stream.
      *
      * Separate from [search] because the two answer different questions. This one is what "get me a
@@ -1249,6 +1555,11 @@ object SonoraBackend {
         val term = query.trim()
         if (term.isEmpty()) return false
 
+        // When the catalogue is already answering this term and the caller is only adding peers,
+        // its rows are kept: the tab that shows them is still on screen and asking again would
+        // blank it for the length of a second request.
+        val catalogue = _search.value.takeIf { it.query == term && !youtubeLoading }
+
         val current = session
         if (current == null) {
             // Nothing to ask the network, so the catalogue answers on its own. A search that
@@ -1257,6 +1568,8 @@ object SonoraBackend {
                 query = term,
                 searching = false,
                 youtubeLoading = youtubeLoading,
+                youtube = catalogue?.youtube.orEmpty(),
+                entities = catalogue?.entities ?: YtmCatalog(),
             )
             return false
         }
@@ -1270,6 +1583,8 @@ object SonoraBackend {
             query = term,
             searching = true,
             youtubeLoading = youtubeLoading,
+            youtube = catalogue?.youtube.orEmpty(),
+            entities = catalogue?.entities ?: YtmCatalog(),
         )
         Log.d(TAG, "searching peers: $term")
 

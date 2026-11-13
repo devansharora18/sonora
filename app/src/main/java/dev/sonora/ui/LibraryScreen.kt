@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.rounded.Radio
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -38,6 +39,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -73,6 +75,7 @@ private enum class LibrarySection(val label: String) {
     Albums("Albums"),
     Artists("Artists"),
     Playlists("Playlists"),
+    Radios("Radios"),
 }
 
 @Composable
@@ -100,12 +103,16 @@ fun LibraryScreen(
     onClosePage: () -> Unit = {},
     /** Sends the listener to the sign-in page. Held here because this is the screen that asks. */
     onNeedPeers: () -> Unit = {},
+    onStartRadio: (String) -> Unit = {},
+    onOpenRadio: () -> Unit = {},
+    onPlayRadio: (String) -> Unit = {},
 ) {
     // Somewhere to send the listener when a file was wanted and there was no network to ask.
     var needPeers by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val tracks by SonoraBackend.library.collectAsState()
     val playlists by SonoraBackend.playlists.collectAsState()
+    val radioState by SonoraBackend.radio.collectAsState()
     val playback by SonoraPlayer.state.collectAsState()
     var section by remember { mutableStateOf(LibrarySection.Tracks) }
     var creating by remember { mutableStateOf(false) }
@@ -319,6 +326,7 @@ fun LibraryScreen(
                     onOpenAlbum = { albumName = it },
                     onOpenArtist = { artistName = it },
                     onNeedPeers = { needPeers = true },
+                    onStartRadio = onStartRadio,
                     scanning = SonoraBackend.scanning.collectAsState().value,
                 )
 
@@ -330,6 +338,15 @@ fun LibraryScreen(
                 LibrarySection.Artists -> ArtistsSection(
                     artists = artists,
                     onOpen = { openArtist = it },
+                )
+
+                LibrarySection.Radios -> RadiosSection(
+                    radios = radioState.saved,
+                    onPlay = onPlayRadio,
+                    onTune = { id ->
+                        SonoraBackend.editRadio(context, id)
+                        onOpenRadio()
+                    },
                 )
 
                 LibrarySection.Playlists -> PlaylistsSection(
@@ -442,6 +459,7 @@ private fun TracksSection(
     onOpenAlbum: (String) -> Unit,
     onOpenArtist: (String) -> Unit,
     onNeedPeers: () -> Unit,
+    onStartRadio: (String) -> Unit,
     scanning: Boolean,
 ) {
     var pending by remember { mutableStateOf<TrackMenu?>(null) }
@@ -564,12 +582,59 @@ private fun TracksSection(
                     onOpenArtist(it)
                 }
             },
+            onStartRadio = menu.track.artist?.takeIf { it.isNotBlank() }?.let {
+                {
+                    pending = null
+                    onStartRadio(it)
+                }
+            },
         )
     }
 }
 
 /** What a row's overflow is about to act on. */
 private data class TrackMenu(val track: LibraryTrack, val canDelete: Boolean)
+
+/**
+ * The radios kept on this device.
+ *
+ * A section here as well as a shelf on Home: Home is where you start one, and the Library is where
+ * the things you made live. Tuning is the row itself; the play disc beside it starts the mix.
+ */
+@Composable
+private fun RadiosSection(
+    radios: List<dev.sonora.backend.radio.SavedRadio>,
+    onPlay: (String) -> Unit,
+    onTune: (String) -> Unit,
+) {
+    if (radios.isEmpty()) {
+        EmptyState(
+            icon = Icons.Rounded.Radio,
+            title = "No radios yet",
+            message = "Pick a few artists on the Radio screen and save the mix.",
+        )
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = listContentPadding(withMiniPlayer = SonoraPlayer.state.collectAsState().value.track != null),
+    ) {
+        items(radios, key = { it.id }) { radio ->
+            SavedRadioRow(
+                radio = radio,
+                onOpen = { onTune(radio.id) },
+                onPlay = { onPlay(radio.id) },
+                onDelete = { },
+            )
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = PAGE_GUTTER),
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+            )
+        }
+    }
+}
 
 @Composable
 private fun AlbumsSection(
@@ -600,6 +665,7 @@ private fun AlbumsSection(
 private fun AlbumRow(album: LibraryGrouping.Album, onClick: () -> Unit) {
     ArtworkRow(
         artworkFile = album.tracks.firstOrNull()?.file,
+        artworkUrl = album.tracks.firstNotNullOfOrNull { it.artworkUrl ?: it.remote?.artworkUrl },
         title = album.name,
         subtitle = listOf(
             album.artist,
@@ -631,6 +697,7 @@ private fun ArtistsSection(
         items(artists, key = { it.name }) { artist ->
             ArtworkRow(
                 artworkFile = artist.tracks.firstOrNull()?.file,
+                artworkUrl = artist.tracks.firstNotNullOfOrNull { it.artworkUrl ?: it.remote?.artworkUrl },
                 title = artist.name,
                 subtitle = listOf(
                     run {

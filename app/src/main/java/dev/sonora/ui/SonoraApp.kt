@@ -95,6 +95,7 @@ import dev.sonora.backend.PageRequest
 import dev.sonora.ytm.YtmCategory
 import dev.sonora.ytm.YtmPlaylistRef
 import dev.sonora.backend.PageKind
+import dev.sonora.backend.radio.RadioSeed
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.HazeState
 import androidx.compose.foundation.layout.width
@@ -298,7 +299,7 @@ private fun ConnectScreen(state: BackendState) {
                         },
                         enabled = username.isNotBlank() && password.isNotBlank(),
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(13.dp),
+                        shape = RoundedCornerShape(11.dp),
                     ) {
                         Text("Connect", style = MaterialTheme.typography.titleMedium)
                     }
@@ -350,6 +351,15 @@ private fun MainTabs(state: BackendState) {
         // The import's own state, remembered here so a run survives a tab switch and a reconnect.
         // The write half is handed in rather than reached for, because creating a playlist needs a
         // Context this object only has once the tabs are being drawn.
+        // One place for "play a saved radio", because Home and the Library both offer it.
+        fun playSavedRadio(id: String) {
+            scope.launch {
+                val tracks = runCatching { SonoraBackend.startSavedRadio(context, id) }
+                    .getOrDefault(emptyList())
+                if (tracks.isNotEmpty()) SonoraPlayer.play(context, tracks, 0)
+            }
+        }
+
         val importRunner = remember {
             SpotifyImportRunner { draft, seed ->
                 val id = SonoraBackend.importSpotifyPlaylist(context, draft.title, draft.matched)
@@ -363,6 +373,7 @@ private fun MainTabs(state: BackendState) {
         var tab by remember { mutableStateOf(MainTab.Home) }
         var playerOpen by remember { mutableStateOf(false) }
         var tasteOpen by remember { mutableStateOf(false) }
+        var radioOpen by remember { mutableStateOf(false) }
         var addTarget by remember { mutableStateOf<LibraryTrack?>(null) }
         // The Spotify import is a sequence with its own state, so it outlives the screen that
         // opened it — a listener who switches tabs mid-import should not lose their progress.
@@ -376,6 +387,9 @@ private fun MainTabs(state: BackendState) {
         // artist line on the player. Held apart from the two names above because a name alone
         // cannot fetch an artist's songs, and following one is for the songs.
         var openPage by remember { mutableStateOf<PageRequest?>(null) }
+        // Which tab a page opened from somewhere other than the Library should give the listener
+        // back to. Null when the Library opened it, because then the Library is already correct.
+        var pageReturnTab by remember { mutableStateOf<MainTab?>(null) }
     // Shelf navigation stacks scoped to each tab so sub-pages never bleed into or block other tabs.
     val homePages = remember { mutableStateListOf<ShelfPage>() }
     val searchPages = remember { mutableStateListOf<ShelfPage>() }
@@ -403,6 +417,7 @@ private fun MainTabs(state: BackendState) {
         LaunchedEffect(Unit) { SonoraBackend.refreshSaved(context) }
         LaunchedEffect(Unit) { SonoraBackend.refreshRecentTracks(context) }
         LaunchedEffect(Unit) { SonoraBackend.refreshTaste(context) }
+        LaunchedEffect(Unit) { SonoraBackend.refreshRadio(context) }
 
         LaunchedEffect(playback.track, playback.isPlaying) {
             while (playback.track != null) {
@@ -433,9 +448,9 @@ private fun MainTabs(state: BackendState) {
                         .statusBarsPadding(),
                 ) {
                     HomeScreen(
+                        onOpenRadio = { radioOpen = true },
                         onImportSpotify = { spotifyImport = true },
-                        onOpenShelfPlaylist = { homePages += ShelfPage.Playlist(it) },
-                        onOpenCategory = { homePages += ShelfPage.Category(it) },
+                        onPlayRadio = { id -> playSavedRadio(id) },
                         onRunSearch = { term ->
                             // A suggestion on Home is really a pre-filled search, so this is
                             // the whole action: go to Search and run it.
@@ -471,6 +486,7 @@ private fun MainTabs(state: BackendState) {
                                 artist = entity.subtitle,
                                 artworkUrl = entity.artworkUrl,
                             )
+                            pageReturnTab = MainTab.Search
                             tab = MainTab.Library
                         },
                         onOpenArtist = { entity ->
@@ -479,6 +495,7 @@ private fun MainTabs(state: BackendState) {
                                 browseId = entity.browseId,
                                 kind = PageKind.ARTIST,
                             )
+                            pageReturnTab = MainTab.Search
                             tab = MainTab.Library
                         },
                     )
@@ -497,8 +514,20 @@ private fun MainTabs(state: BackendState) {
                     openAlbumName = openAlbumName,
                     onCloseAlbum = { openAlbumName = null },
                     openPage = openPage,
-                    onClosePage = { openPage = null },
+                    onClosePage = {
+                        openPage = null
+                        pageReturnTab?.let { tab = it }
+                        pageReturnTab = null
+                    },
                     onNeedPeers = { tab = MainTab.Network },
+                    onOpenRadio = { radioOpen = true },
+                    onPlayRadio = { id -> playSavedRadio(id) },
+                    onStartRadio = { artist ->
+                        // A radio from one track is a radio from its artist: the mix is built from
+                        // artists, and the artist is the only part of the row that could seed one.
+                        SonoraBackend.addRadioSeed(context, RadioSeed(artist))
+                        radioOpen = true
+                    },
                 )
                 MainTab.Settings -> Box(
                     modifier = Modifier
@@ -708,6 +737,26 @@ private fun MainTabs(state: BackendState) {
                         )
                         tab = MainTab.Library
                         playerOpen = false
+                    },
+                )
+            }
+        }
+
+        if (radioOpen) {
+            BackHandler { radioOpen = false }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .statusBarsPadding(),
+            ) {
+                RadioScreen(
+                    onBack = { radioOpen = false },
+                    onPlay = { tracks ->
+                        // The mix replaces the queue: it is a thing to listen to now, not something
+                        // to append to whatever was already there.
+                        SonoraPlayer.play(context, tracks, 0)
+                        radioOpen = false
                     },
                 )
             }

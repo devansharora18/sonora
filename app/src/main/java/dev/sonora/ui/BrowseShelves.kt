@@ -32,6 +32,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -131,6 +132,11 @@ private fun CategoryTile(
     val shipped = rememberCategoryArtwork(category.title)
     val fetched = rememberArtworkAt(artwork, px = CARD_ART_PX)
 
+    // A grey stripe is a category with no colour of its own, and its gradient is a flat block of
+    // #3a3a3a. Flat is not a tile: it reads as one that failed to load. The note glyph gives it
+    // something to be.
+    val flat = tint.chroma() < ACHROMATIC_CHROMA
+
     Box(
         modifier = modifier
             .height(96.dp)
@@ -147,6 +153,17 @@ private fun CategoryTile(
             )
             .clickable(onClick = onClick),
     ) {
+        if (shipped == null && fetched == null && flat) {
+            Icon(
+                imageVector = Icons.Filled.MusicNote,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.35f),
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(34.dp),
+            )
+        }
+
         if (shipped != null) {
             Image(
                 painter = shipped,
@@ -176,19 +193,19 @@ private fun CategoryTile(
             )
         }
 
-        // And a scrim under the name. Weighted towards the bottom rather than even, because the
-        // name is at the bottom and it is the one thing on the tile that has to be readable: a pale
-        // photograph behind white text is unreadable at the top of the tile and fine at the bottom,
-        // so the scrim is not.
+        // The scrim and the name are at the top, not the bottom. A borrowed cover is not a blank
+        // picture: most of them print their own headline across the lower half — "GAMING HITS",
+        // "Bollywood Melancholy" — and a name drawn there lands on top of it, so the tile says two
+        // different things in the same place. The top of a YouTube Music cover is the picture.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        0f to Color.Black.copy(alpha = 0.10f),
-                        0.40f to Color.Black.copy(alpha = 0.32f),
-                        0.75f to Color.Black.copy(alpha = 0.62f),
-                        1f to Color.Black.copy(alpha = 0.88f),
+                        0f to Color.Black.copy(alpha = 0.82f),
+                        0.34f to Color.Black.copy(alpha = 0.42f),
+                        0.62f to Color.Black.copy(alpha = 0.10f),
+                        1f to Color.Transparent,
                     ),
                 ),
         )
@@ -200,7 +217,7 @@ private fun CategoryTile(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
-                .align(Alignment.BottomStart)
+                .align(Alignment.TopStart)
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         )
     }
@@ -366,3 +383,13 @@ private fun Color.lighten(by: Float): Color = Color(
 )
 
 private fun Color.perceivedLuminance(): Float = 0.299f * red + 0.587f * green + 0.114f * blue
+
+/** How far a colour is from grey: the spread between its strongest and weakest channel. */
+private fun Color.chroma(): Float {
+    val highest = maxOf(red, green, blue)
+    val lowest = minOf(red, green, blue)
+    return highest - lowest
+}
+
+/** Below this, a category's stripe carries no hue and its gradient is a grey block. */
+private const val ACHROMATIC_CHROMA = 0.05f

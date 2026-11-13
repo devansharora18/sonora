@@ -37,6 +37,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -55,6 +56,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Spacer
@@ -71,6 +73,8 @@ import dev.sonora.backend.SonoraPlayer
 import dev.sonora.backend.SearchSource
 import dev.sonora.backend.SearchState
 import dev.sonora.backend.toYtm
+import kotlinx.coroutines.delay
+import dev.sonora.backend.BackendState
 import dev.sonora.backend.SonoraBackend
 import dev.sonora.backend.SortMode
 import dev.sonora.ui.theme.accentText
@@ -109,9 +113,17 @@ fun SearchScreen(
     }
     val sources by SonoraBackend.searchSources.collectAsState()
 
-    // Keyed on the committed query so clearing the search clears the box with it, rather than
-    // leaving stale text above an empty result list.
-    var query by remember(searchState.query) { mutableStateOf(searchState.query) }
+    // The box is the listener's while they are typing, and the committed query otherwise. It used
+    // to be keyed on the committed query, which was fine when a search only happened on submit;
+    // with results arriving per pause in typing, re-keying it would rewrite the field under the
+    // finger — a trailing space disappearing mid-word is the visible version of that.
+    var query by remember { mutableStateOf(searchState.query) }
+    var fieldFocused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(searchState.query, fieldFocused) {
+        if (!fieldFocused) query = searchState.query
+    }
+
     fun runSearch(term: String) {
         query = term
         if (term.isNotBlank()) SonoraBackend.search(context, term.trim())
@@ -130,15 +142,31 @@ fun SearchScreen(
     // recent queries the moment the field is touched, because that is the moment the listener has
     // decided they are going to type something — and a page of coloured categories under a field
     // they are reaching for is in the way of the thing they came to do.
-    var fieldFocused by remember { mutableStateOf(false) }
     val showingShelves = showingHistory && !fieldFocused
 
     // What has been played out of a search, so the page can offer the answer rather than the
     // question. Read here rather than remembered so it survives leaving the tab.
     val recentTracks by SonoraBackend.recentTracks.collectAsState()
 
+    val backendState by SonoraBackend.state.collectAsState()
+
     var selectedTab by remember { mutableStateOf(SearchSource.YOUTUBE_MUSIC) }
     val showSoulseek = selectedTab == SearchSource.SOULSEEK
+
+    // Results as the listener types. Restarting this coroutine on every keystroke *is* the
+    // debounce: the delay only runs once typing has stopped. The backend drops anything that
+    // arrives for a query the listener has already moved on from, so a slow answer cannot land
+    // under a newer word.
+    LaunchedEffect(query, selectedTab) {
+        val term = query.trim()
+        if (term.length < LIVE_SEARCH_MIN_CHARS) return@LaunchedEffect
+        if (term == SonoraBackend.search.value.query) return@LaunchedEffect
+
+        delay(LIVE_SEARCH_DEBOUNCE_MS)
+        // The peer network is asked only when its own tab is showing: a broadcast search is not
+        // something to send once per pause in typing while the listener is reading YouTube rows.
+        SonoraBackend.searchWhileTyping(context, term, peers = selectedTab == SearchSource.SOULSEEK)
+    }
     val showYoutube = selectedTab == SearchSource.YOUTUBE_MUSIC
 
     // The top result's second button, and the flow it opens. Held here rather than inside the
@@ -237,7 +265,13 @@ fun SearchScreen(
 
         SearchField(
             query = query,
-            onQueryChange = { query = it },
+            onQueryChange = { typed ->
+                query = typed
+                // Emptying the box is a request to go back, not just to stop typing: with the field
+                // no longer keyed on the committed query, the old rows would otherwise sit under an
+                // empty box with no way back to the recent searches.
+                if (typed.isBlank() && searchState.query.isNotBlank()) SonoraBackend.clearSearch()
+            },
             onSubmit = { SonoraBackend.search(context, query.trim()) },
             onFocusChange = { fieldFocused = it },
         )
@@ -252,7 +286,28 @@ fun SearchScreen(
                 ChoicePill(
                     label = "Soulseek",
                     selected = selectedTab == SearchSource.SOULSEEK,
-                    onClick = { selectedTab = SearchSource.SOULSEEK },
+                    onClick = {
+                        selectedTab = SearchSource.SOULSEEK
+                        // The catalogue has been answering while the listener typed; the peers have
+                        // not been asked yet, and a tab that opens onto "nothing on the network"
+                        // under a query already typed reads as a broken search.
+                        val term = query.trim()
+                        // Only when the peers have not answered this term: a submitted search
+                        // already asked them, and asking again would wipe the rows on screen,
+                        // reset the sort and start another twenty-second broadcast.
+                        val peersSilent = searchState.hits.isEmpty() && !searchState.searching
+                        if (term.length >= LIVE_SEARCH_MIN_CHARS &&
+                            searchState.query == term &&
+                            peersSilent
+                        ) {
+                            SonoraBackend.searchPeers(
+                                context,
+                                term,
+                                record = false,
+                                youtubeLoading = false,
+                            )
+                        }
+                    },
                 )
             }
         }
@@ -423,7 +478,9 @@ fun SearchScreen(
                     item(key = "artists") {
                         EntityShelf(
                             title = "Artists",
-                            subtitle = "From YouTube Music; tap to open",
+                            // No source line: the pills above already say YouTube Music, and saying
+                            // it again under every heading turns a label into a disclaimer.
+                            subtitle = "Artists in the catalogue",
                             entities = entities.artists,
                             onOpen = onOpenArtist,
                         )
@@ -434,7 +491,7 @@ fun SearchScreen(
                     item(key = "albums") {
                         EntityShelf(
                             title = "Albums",
-                            subtitle = "From YouTube Music; tap to open",
+                            subtitle = "Releases in the catalogue",
                             entities = entities.albums,
                             onOpen = onOpenAlbum,
                         )
@@ -489,6 +546,18 @@ fun SearchScreen(
                 }
 
                 if (showSoulseek) {
+                    // An empty page is indistinguishable from a broken one. The network answering
+                    // with nothing and the network never having been set up are two different
+                    // states, and each has a different thing to do about it.
+                    if (searchState.hits.isEmpty() && !searchState.searching) {
+                        item(key = "soulseek-empty") {
+                            SoulseekEmpty(
+                                query = query.trim(),
+                                connected = backendState is BackendState.Connected,
+                                onSignIn = onNeedPeers,
+                            )
+                        }
+                    }
                     if (searchState.hits.isNotEmpty()) {
                         item(key = "soulseek-instruction") {
                             Text(
@@ -829,3 +898,51 @@ private fun quality(hit: SearchHit): String {
 
     return parts.joinToString(" ")
 }
+
+/**
+ * What the peer network is doing when it has no rows to show.
+ *
+ * Two states, not one: not signed in is a setup question with an answer, and signed in with no
+ * hits is a search that found nothing. Showing the same blank page for both is what made this
+ * screen look broken.
+ */
+@Composable
+private fun SoulseekEmpty(query: String, connected: Boolean, onSignIn: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = PAGE_GUTTER, vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = if (connected) "Nothing on the network" else "Sign in to search the network",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+            textAlign = TextAlign.Center,
+        )
+        Text(
+            text = if (connected) {
+                if (query.isEmpty()) {
+                    "Search for a song and the network's files show up here."
+                } else {
+                    "No peer had “$query”. Try a different spelling, or search the catalogue."
+                }
+            } else {
+                "Soulseek is where the lossless files are. Searching and streaming work without it."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        if (!connected) {
+            Button(onClick = onSignIn) { Text("Sign in") }
+        }
+    }
+}
+
+/** How long typing has to stop before the page asks again. */
+private const val LIVE_SEARCH_DEBOUNCE_MS = 350L
+
+/** The fewest characters worth asking about; the same threshold the backend holds. */
+private const val LIVE_SEARCH_MIN_CHARS = 2

@@ -83,7 +83,6 @@ const val HERO_CARD_RATIO: Float = 0.92f
 fun heroCardWidth(available: Dp): Dp = minOf(available * HERO_CARD_FRACTION, HERO_CARD_MAX_WIDTH)
 
 /** Share of the row a page of tracks takes, so the next page peeks in past it. */
-private const val TRACK_COLUMN_FRACTION = 0.88f
 
 /**
  * How wide a sideways-paging column of track rows is ever allowed to get.
@@ -92,15 +91,6 @@ private const val TRACK_COLUMN_FRACTION = 0.88f
  * of a tablet the contents stay their own size and the space all lands between the title and the
  * overflow button.
  */
-private val TRACK_COLUMN_MAX_WIDTH: Dp = 400.dp
-
-/**
- * How wide a column of track rows should be in a row [available] wide — shared by Home's Recents,
- * an artist's top songs, and the skeletons that stand in for them.
- */
-fun trackColumnWidth(available: Dp): Dp =
-    minOf(available * TRACK_COLUMN_FRACTION, TRACK_COLUMN_MAX_WIDTH)
-
 /** The narrowest a library grid card is let get before another column gives way. */
 private val LIBRARY_GRID_MIN_CARD_WIDTH: Dp = 140.dp
 

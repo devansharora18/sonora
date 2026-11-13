@@ -19,7 +19,12 @@ internal class JsonFile<T>(
     private val serializer: KSerializer<T>,
 ) {
 
-    private val json = Json { prettyPrint = true }
+    // `ignoreUnknownKeys` so a document written by an older build still reads: a field that was
+    // removed is not a reason to throw away the listener's radios or playlists.
+    private val json = Json {
+        prettyPrint = true
+        ignoreUnknownKeys = true
+    }
 
     /**
      * Reads the stored value, or null when there is nothing readable there.

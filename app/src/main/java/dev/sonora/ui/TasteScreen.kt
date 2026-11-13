@@ -5,6 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -83,6 +84,10 @@ fun TasteScreen(onBack: () -> Unit) {
             .verticalScroll(rememberScrollState())
             .padding(bottom = listBottomPadding(withMiniPlayer = false)),
     ) {
+        Row(modifier = Modifier.padding(start = PAGE_GUTTER, top = 8.dp)) {
+            PageBackButton(onClick = onBack)
+        }
+
         Text(
             text = "Taste",
             style = MaterialTheme.typography.displayLarge,

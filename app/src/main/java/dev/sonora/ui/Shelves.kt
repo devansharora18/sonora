@@ -82,7 +82,7 @@ internal fun ShelfHeader(
         if (onShowAll != null) {
             Text(
                 text = "Show all",
-                style = MaterialTheme.typography.titleSmall,
+                style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.accentText,
                 modifier = Modifier
                     .clip(RoundedCornerShape(percent = 50))
@@ -113,6 +113,13 @@ internal fun ShelfCard(
      * — a playlist. Empty for a card that is its own image, and for one that has only an icon.
      */
     mosaic: List<LibraryTrack> = emptyList(),
+    /**
+     * How many lines the title may take.
+     *
+     * One everywhere except a radio, whose name is its artists: a truncated "Billie Eilish, Arctic
+     * …" is not a name, and the card is the only place on Home that says which mix this is.
+     */
+    titleLines: Int = 1,
 ) {
     Column(
         modifier = modifier
@@ -162,7 +169,7 @@ internal fun ShelfCard(
             text = title,
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onBackground,
-            maxLines = 1,
+            maxLines = titleLines,
             overflow = TextOverflow.Ellipsis,
         )
         Text(

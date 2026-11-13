@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Logout
@@ -28,6 +29,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sonora.backend.MusicDirectory
 import dev.sonora.backend.SonoraBackend
+
+/** The installed version, read from the package rather than from a build config field. */
+@Composable
+private fun rememberVersionName(context: android.content.Context): String = remember {
+    runCatching {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName
+    }.getOrNull().orEmpty().ifBlank { "unknown" }
+}
 
 @Composable
 fun SettingsScreen(onOpenTaste: () -> Unit = {}) {
@@ -203,6 +212,22 @@ fun SettingsScreen(onOpenTaste: () -> Unit = {}) {
                     }
                 }
             }
+        }
+
+        SettingsGroup(
+            header = "About",
+            footer = "Sonora is free software under the GNU AGPL v3. It is a file-sharing client, " +
+                "not a content host.",
+        ) {
+            SettingsRow(
+                icon = Icons.Filled.Info,
+                title = "Version",
+                value = rememberVersionName(context),
+            )
+
+            RowDivider()
+
+            SettingsRow(title = "Licence", value = "AGPL-3.0")
         }
 
         SettingsGroup(

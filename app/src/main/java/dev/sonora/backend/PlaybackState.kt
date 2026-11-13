@@ -13,10 +13,20 @@ enum class RepeatMode {
     One,
 }
 
+/**
+ * How far through the track playback is.
+ *
+ * Separate from [PlaybackState] because it is the one thing that changes several times a second,
+ * and a page that subscribes to it should be the only thing redrawn when it does.
+ */
+data class Progress(
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L,
+)
+
 data class PlaybackState(
     val track: LibraryTrack? = null,
     val isPlaying: Boolean = false,
-    val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     val isShuffled: Boolean = false,
     val repeatMode: RepeatMode = RepeatMode.Off,

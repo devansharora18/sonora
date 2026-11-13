@@ -157,9 +157,6 @@ class TasteEngine(
             return radio.filterNot { it.key == cur?.key }.distinctBy { it.key }.take(count)
         }
 
-        val excluded = snapshot.recent.takeLast(RECENT_WINDOW).toMutableSet()
-        cur?.let { excluded += it.key }
-
         val pool = buildCandidates(snapshot, cur, now)
 
         // The radio is always consulted, not only when the pool is short: it is the exploration
@@ -167,6 +164,47 @@ class TasteEngine(
         // something new put in front of it.
         val radio = runCatching { external(cur) }.getOrDefault(emptyList())
         for (ref in radio) if (pool.none { it.key == ref.key }) pool += ref
+
+        return rankFrom(pool, cur, count, RankProfile(), snapshot, now)
+    }
+
+    /**
+     * Scores [pool] and samples [count] out of it, best-first under a softmax.
+     *
+     * The half of [next] that every mix shares: where the candidates came from is the caller's
+     * business, and how they are weighed is [profile]'s. Radio builds its own pool — three seeds
+     * instead of one track — and leans on the same scorer, so a mix and Autoplay cannot drift into
+     * two different ideas of what this listener likes.
+     */
+    fun rank(
+        pool: List<TrackRef>,
+        cur: TrackRef?,
+        count: Int,
+        profile: RankProfile = RankProfile(),
+    ): List<TrackRef> = rankFrom(pool, cur, count, profile, model, clock())
+
+    /**
+     * The model's own candidates for [cur]: strong transitions, the top artists' completed tracks,
+     * and everything liked.
+     *
+     * Exposed for a caller building a wider pool than Autoplay needs. The returned list is the same
+     * one [next] starts from, so a mix that adds to it also inherits Autoplay's idea of "familiar".
+     */
+    fun candidates(cur: TrackRef?): List<TrackRef> = buildCandidates(model, cur, clock())
+
+    private fun rankFrom(
+        pool: List<TrackRef>,
+        cur: TrackRef?,
+        count: Int,
+        profile: RankProfile,
+        snapshot: TasteModel,
+        now: Long,
+    ): List<TrackRef> {
+        if (count <= 0 || pool.isEmpty()) return emptyList()
+
+        val window = profile.repeatWindow.coerceAtLeast(0)
+        val excluded = if (window == 0) mutableSetOf() else snapshot.recent.takeLast(window).toMutableSet()
+        cur?.let { excluded += it.key }
 
         // The recent window is a preference, not a veto: a model smaller than the window would
         // otherwise have every candidate excluded and fall through to an unranked list, which is
@@ -192,6 +230,7 @@ class TasteEngine(
                     model = snapshot,
                     context = context,
                     now = now,
+                    profile = profile,
                 )
             }
 
@@ -274,6 +313,7 @@ class TasteEngine(
         model: TasteModel,
         context: List<String>,
         now: Long,
+        profile: RankProfile,
     ): Double {
         val edge1 = currentKey?.let { model.edges[it]?.get(candidate.key) }?.at(now, HALF_LIFE_EDGE) ?: 0.0
         val edge2 = previousKey?.let { model.edges[it]?.get(candidate.key) }?.at(now, HALF_LIFE_EDGE) ?: 0.0
@@ -291,17 +331,17 @@ class TasteEngine(
 
         val familiarity = ln(1.0 + stats.completes.toDouble())
         val liked = if (stats.liked) LIKED_BONUS else 0.0
-        val novelty = if (stats.plays == 0) NOVELTY_BONUS else 0.0
-        val skip = if (stats.plays >= 2) SKIP_PENALTY * stats.skipRate() else 0.0
+        val novelty = if (stats.plays == 0) profile.noveltyBonus else 0.0
+        val skip = if (stats.plays >= 2) profile.skipPenalty * stats.skipRate() else 0.0
         val repeats = context.takeLast(3).count { key ->
             model.tracks[key]?.ref?.artistKey == candidate.artistKey
         }
 
         return edge1 +
             EDGE2_WEIGHT * edge2 +
-            ARTIST_WEIGHT * artistAffinity +
+            profile.artistWeight * artistAffinity +
             TAG_WEIGHT * tagAffinity +
-            FAMILIARITY_WEIGHT * familiarity +
+            profile.familiarityWeight * familiarity +
             liked +
             novelty -
             skip -
@@ -317,7 +357,10 @@ class TasteEngine(
     private fun sample(scored: List<Pair<TrackRef, Double>>, limit: Int): TrackRef? {
         if (scored.isEmpty()) return null
 
-        val top = scored.sortedByDescending { it.second }.take(limit)
+        // Shuffled before the sort so equal scores are broken at random. Without it a cold model —
+        // where every candidate scores the same — would always draw from the first few entries of
+        // the pool, which for a seeded mix means the first seed's radio and nothing else.
+        val top = scored.shuffled(random).sortedByDescending { it.second }.take(limit)
         if (top.size == 1) return top.first().first
 
         val max = top.maxOf { it.second }
@@ -537,12 +580,12 @@ class TasteEngine(
         const val SQUASH = 2.0
 
         const val EDGE2_WEIGHT = 0.4
-        const val ARTIST_WEIGHT = 0.6
-        const val TAG_WEIGHT = 0.5
-        const val FAMILIARITY_WEIGHT = 0.2
-        const val LIKED_BONUS = 0.3
-        const val NOVELTY_BONUS = 0.15
-        const val SKIP_PENALTY = 0.8
+        internal const val ARTIST_WEIGHT = 0.6
+        internal const val TAG_WEIGHT = 0.5
+        internal const val FAMILIARITY_WEIGHT = 0.2
+        internal const val LIKED_BONUS = 0.3
+        internal const val NOVELTY_BONUS = 0.15
+        internal const val SKIP_PENALTY = 0.8
         const val REPEAT_PENALTY = 0.5
     }
 }
