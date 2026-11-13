@@ -111,7 +111,11 @@ class RadioBuilder(
         val otherProfile = if (setup.familiarOnly) RankProfile.FAMILIAR else RankProfile.DISCOVER
 
         return blend(
-            selected = engine.rank(selected, cur, selected.size, selectedProfile),
+            // The picks are balanced across the artists and never queued in a run: a mix of two
+            // artists that plays seven of one and three of the other, in blocks, is not a mix of
+            // two artists. The neighbourhood half is left in ranked order — it is meant to be a
+            // crowd, and forcing it to alternate would be a different kind of artificial.
+            selected = balancedByArtist(engine.rank(selected, cur, selected.size, selectedProfile)),
             others = engine.rank(others, cur, others.size, otherProfile),
             selectedShare = setup.selectedShare,
             count = count,
@@ -173,6 +177,44 @@ class RadioBuilder(
             }
 
             out += if (takeSelected) picked[fromSelected++] else pickedOthers[fromOthers++]
+        }
+
+        return out
+    }
+
+    /**
+     * The picks, dealt out one artist at a time.
+     *
+     * Each picked artist is a lane, and the next track always comes from the lane that has given
+     * the fewest so far — so two picks split the half evenly instead of one of them taking it on
+     * the strength of a bigger catalogue or a stronger score. A lane that would repeat the artist
+     * just played yields to another one when there is one, which is what stops four Billie Eilish
+     * tracks queueing in a row.
+     *
+     * Within each lane the order is the ranked order, which is itself sampled, so the sequence is
+     * varied run to run without the balance drifting.
+     */
+    internal fun balancedByArtist(ranked: List<TrackRef>): List<TrackRef> {
+        if (ranked.size < 2) return ranked
+
+        val lanes = LinkedHashMap<String, MutableList<TrackRef>>()
+        for (ref in ranked) lanes.getOrPut(ref.artistKey) { mutableListOf() } += ref
+        if (lanes.size < 2) return ranked
+
+        val out = ArrayList<TrackRef>(ranked.size)
+        val taken = lanes.keys.associateWith { 0 }.toMutableMap()
+        var last: String? = null
+
+        while (out.size < ranked.size) {
+            val available = lanes.keys.filter { taken.getValue(it) < lanes.getValue(it).size }
+            if (available.isEmpty()) break
+
+            val noRepeat = available.filter { it != last }
+            val lane = (noRepeat.ifEmpty { available }).minBy { taken.getValue(it) }
+
+            out += lanes.getValue(lane)[taken.getValue(lane)]
+            taken[lane] = taken.getValue(lane) + 1
+            last = lane
         }
 
         return out

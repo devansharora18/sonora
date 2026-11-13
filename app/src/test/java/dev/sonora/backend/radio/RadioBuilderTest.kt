@@ -47,6 +47,11 @@ class RadioBuilderTest {
 
     private fun catalogue(size: Int) = List(size) { ref("catalogue $it", "Billie Eilish") }
 
+    private fun assertNoArtistRuns(mix: List<TrackRef>) {
+        val runs = mix.zipWithNext().filter { (a, b) -> a.artist == b.artist }
+        assertEquals("found ${runs.size} artist run(s): ${mix.map { it.artist }}", 0, runs.size)
+    }
+
     @Test
     fun `no picked artists builds nothing`() = runBlocking {
         val mix = builder(engine()) { emptyList() }
@@ -112,6 +117,42 @@ class RadioBuilderTest {
         assertEquals(20, mix.size)
         val own = mix.count { it.artist == "Billie Eilish" }
         assertTrue("expected at least sixteen picks, got $own", own >= 16)
+    }
+
+    @Test
+    fun `two picked artists are dealt the half evenly and never in a run`() = runBlocking {
+        val billie = List(20) { ref("billie $it", "Billie Eilish") }
+        val tame = List(20) { ref("tame $it", "Tame Impala") }
+
+        val mix = builder(engine(), catalogue = { seed ->
+            if (seed.name == "Billie Eilish") billie else tame
+        }) { emptyList() }
+            .build(setup("Billie Eilish", "Tame Impala", stop = 0), library = emptyList(), count = 20)
+
+        assertEquals(10, mix.count { it.artist == "Billie Eilish" })
+        assertEquals(10, mix.count { it.artist == "Tame Impala" })
+        assertNoArtistRuns(mix)
+    }
+
+    @Test
+    fun `three picked artists share the half as evenly as the supply allows`() = runBlocking {
+        val catalogues = mapOf(
+            "Billie Eilish" to List(20) { ref("billie $it", "Billie Eilish") },
+            "Tame Impala" to List(20) { ref("tame $it", "Tame Impala") },
+            "Khalid" to List(20) { ref("khalid $it", "Khalid") },
+        )
+
+        val mix = builder(engine(), catalogue = { seed -> catalogues.getValue(seed.name) }) { emptyList() }
+            .build(
+                setup("Billie Eilish", "Tame Impala", "Khalid", stop = 0),
+                library = emptyList(),
+                count = 18,
+            )
+
+        val counts = mix.groupingBy { it.artist }.eachCount()
+        assertEquals(3, counts.size)
+        assertTrue("expected even shares, got $counts", counts.values.max() - counts.values.min() <= 1)
+        assertNoArtistRuns(mix)
     }
 
     @Test
