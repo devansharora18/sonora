@@ -43,6 +43,7 @@ import dev.sonora.ytm.YtmShelves
 import dev.sonora.ytm.YtmTrack
 import java.io.File
 import java.util.UUID
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -700,8 +701,13 @@ object SonoraBackend {
 
         activeRadio = setup
         activeRadioKeys = refs.mapTo(HashSet()) { it.key }
+        // The ratio is in the label so the queue can be checked against the slider at a glance —
+        // a mix is built at the stop it was started with, and moving the slider afterwards does
+        // not rebuild what is already playing.
+        val picked = (setup.selectedShare * 100).roundToInt()
         _activeRadioLabel.value =
             (if (setup.familiarOnly) "Familiar · " else "Radio · ") +
+            "$picked:${100 - picked} · " +
             setup.seeds.joinToString(", ") { it.name }
 
         return refs.mapNotNull { it.toLibraryTrack() }

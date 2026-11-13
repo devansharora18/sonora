@@ -115,6 +115,39 @@ class RadioBuilderTest {
     }
 
     @Test
+    fun `a listener who has just played the artist still gets them in the mix`() = runBlocking {
+        // Every pick is inside the taste model's recently-played window, which the picks half must
+        // ignore: those tracks are exactly what the slider asked for. Honouring it starved the
+        // picks to nothing and let the untouched neighbours take the queue.
+        val engine = engine()
+        val catalogue = catalogue(40)
+        catalogue.forEachIndexed { index, ref ->
+            engine.recordPlay(ref, listenedMs = 200_000, durationMs = 200_000, now = index * 1_000L)
+        }
+
+        val mix = builder(engine, catalogue = { catalogue }) { mixedRadio(own = 0, other = 40) }
+            .build(setup("Billie Eilish", stop = 1), library = emptyList(), count = 20)
+
+        val own = mix.count { it.artist == "Billie Eilish" }
+        assertEquals("expected sixteen of twenty", 16, own)
+    }
+
+    @Test
+    fun `a short picks half shrinks the mix instead of skewing the ratio`() = runBlocking {
+        // The refill situation: most of the artist's catalogue has been played and is excluded, so
+        // only three of their tracks are left while forty neighbours are available. An 80:20 batch
+        // must not come back as three picks and seven strangers.
+        val catalogue = catalogue(3)
+        val others = List(40) { ref("near $it", "Other Artist $it") }
+
+        val batch = builder(engine(), catalogue = { catalogue }) { others }
+            .build(setup("Billie Eilish", stop = 1), library = emptyList(), count = 10)
+
+        val own = batch.count { it.artist == "Billie Eilish" }
+        assertTrue("expected at least 75% picks, got $own of ${batch.size}", own * 4 >= batch.size * 3)
+    }
+
+    @Test
     fun `a refill never offers a track the radio already queued`() = runBlocking {
         val first = builder(engine(), catalogue = { catalogue(20) }) { emptyList() }
             .build(setup("Billie Eilish", stop = 0), library = emptyList(), count = 10)

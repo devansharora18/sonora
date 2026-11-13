@@ -100,7 +100,14 @@ class RadioBuilder(
 
         // Both halves are ordered before they are blended, so the mix is "the best of these
         // artists, interleaved with the best of the rest" rather than the two races in one list.
-        val selectedProfile = if (setup.familiarOnly) RankProfile.FAMILIAR else RankProfile.DEFAULT
+        // The picks half ignores the recently-played window. That window exists to stop Autoplay
+        // repeating itself, but a radio is built from the artist the listener *chose*, and the
+        // tracks they have heard by that artist are exactly the ones the slider is asking for.
+        // Left on, it starved the picks down to the handful never played while the neighbours —
+        // all new, none excluded — took the rest of the queue: an 80:20 mix that came out 20:80.
+        // Repeats across refills are handled by the exclusion set instead.
+        val selectedProfile = (if (setup.familiarOnly) RankProfile.FAMILIAR else RankProfile.DEFAULT)
+            .copy(repeatWindow = 0)
         val otherProfile = if (setup.familiarOnly) RankProfile.FAMILIAR else RankProfile.DISCOVER
 
         return blend(
@@ -132,17 +139,24 @@ class RadioBuilder(
     ): List<TrackRef> {
         val share = selectedShare.coerceIn(0f, 1f)
         val wantedSelected = (count * share).roundToInt()
-        val wantedOthers = count - wantedSelected
-
         val pickedSelected = selected.take(wantedSelected)
+
+        // The other half is capped by what the picks half actually supplied, not by the stop alone.
+        // Cutting both halves to their own quotas independently is what let an 80:20 refill come
+        // out at 3 picks to 8 strangers: the picks had run down, their quota went unfilled, and the
+        // others still took their full share of the slot count. A short mix is honest; a mix that
+        // says 80:20 and is 27:73 is not.
+        val othersCap = if (share <= 0f) {
+            count
+        } else {
+            (pickedSelected.size * (1f - share) / share).roundToInt()
+        }
+        val wantedOthers = (count - pickedSelected.size).coerceAtMost(othersCap)
         val pickedOthers = others.take(wantedOthers)
 
         // The neighbourhood ran out first: the picks may take the rest of the queue.
-        val picked = if (pickedOthers.size < wantedOthers) {
-            pickedSelected + selected.drop(pickedSelected.size).take(count - pickedSelected.size - pickedOthers.size)
-        } else {
-            pickedSelected
-        }
+        val picked = pickedSelected + selected.drop(pickedSelected.size)
+            .take((count - pickedSelected.size - pickedOthers.size).coerceAtLeast(0))
 
         val out = ArrayList<TrackRef>(count)
         var fromSelected = 0
