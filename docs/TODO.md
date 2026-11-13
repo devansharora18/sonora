@@ -39,7 +39,10 @@ network available and once in airplane mode (cold start must fall back without c
    untouched.
 7. Search the artist picker for a name that returns several artists ("passenger" returns six):
    the list must render, and only the one actually added may read **Added**.
-8. Play a 100:0 radio of one artist and skip past the whole queue: the refill must still be that
+8. Start an 80:20 radio from artists you have been playing all week: the queue should be full (not
+   two tracks) and mostly them. The queue header prints the ratio it was built at, so a queue can
+   be checked against the slider at a glance.
+9. Play a 100:0 radio of one artist and skip past the whole queue: the refill must still be that
    artist only, and the queue header must still say `Radio · <artist>`. Never another artist's
    name unless the slider allows it.
 

@@ -58,6 +58,13 @@ something already queued. And when a finite catalogue runs low the batch is topp
 whole pool rather than dribbled out one track at a time: repeating these artists is what an endless
 radio of them means, and it beats handing the queue to Autoplay.
 
+**The picks half ignores the recently-played window.** That window exists so Autoplay does not
+repeat itself, but a radio is built from the artist the listener *chose*, and the tracks they have
+heard by that artist are exactly what the slider is asking for. Left on, it starved the picks down
+to the handful never played while the neighbours — all new, none excluded — took the rest: an 80:20
+radio that came out 20:80, and refills of two tracks. Repeats across refills are handled by the
+radio's own exclusion set instead.
+
 **A stop is a quota, not a starting point.** Each half of the mix is cut to its own share before
 the two are interleaved, so 100:0 is all picks and a mix that runs out of them is shorter rather
 than padded with other artists. The only top-up allowed is towards the picks, when the
