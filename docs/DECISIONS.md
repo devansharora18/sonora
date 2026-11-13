@@ -58,6 +58,13 @@ something already queued. And when a finite catalogue runs low the batch is topp
 whole pool rather than dribbled out one track at a time: repeating these artists is what an endless
 radio of them means, and it beats handing the queue to Autoplay.
 
+**The picked artists are dealt out evenly and never in a run.** Ranked order alone let one artist
+take most of the picks — a bigger catalogue or a stronger score was enough — and let four of their
+tracks queue back to back. Each picked artist is now a lane, and the next track comes from the lane
+that has given the fewest so far, skipping the artist just played when there is an alternative. Two
+picks therefore split their half evenly, and the queue alternates instead of playing one artist in
+blocks. The songs inside each lane stay in sampled order, so the sequence varies run to run.
+
 **The picks half ignores the recently-played window.** That window exists so Autoplay does not
 repeat itself, but a radio is built from the artist the listener *chose*, and the tracks they have
 heard by that artist are exactly what the slider is asking for. Left on, it starved the picks down
